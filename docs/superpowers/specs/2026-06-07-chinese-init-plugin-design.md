@@ -153,3 +153,10 @@ allowed-tools: Read, Write, Edit
 
 ## 11. 兼容性说明
 即便某些 Claude Code 版本未实现 `settings.json` 的 `language` 字段，`CLAUDE.md` 中的规范仍能约束输出语言，二者构成双保险。
+
+## 12. 安装与环境说明（实现后补充）
+
+- **`/plugin` 命令仅在 Claude Code CLI（终端版）可用**；桌面/GUI 客户端通常没有该命令，其「Directory」只展示官方精选内容、不索引个人 GitHub 仓库。因此本插件的安装统一在 **CLI 终端**完成：`/plugin marketplace add hangwenlei/My-Skills` + `/plugin install chinese@my-skills`。
+- **CLI 与 GUI 客户端共用同一个 `~/.claude/` 目录**：插件注册信息写在 `~/.claude/plugins/`（`known_marketplaces.json`、`installed_plugins.json`、`marketplaces/`、`cache/`）。所以在 CLI 装好后，**重启 GUI 客户端即可加载**，`/chinese:init` 两端通用。
+- **不要让 agent 直接写 `~/.claude/`**：往 `~/.claude/skills/` 写 SKILL.md 会触发「自我修改」权限护栏被拒；改 `~/.claude/plugins/` 注册表会被沙箱保护拦截。安装应由用户在自己的 CLI 中以正常用户操作完成，而非由 agent 代写配置目录。
+- **发布即推送**：仓库设为 public 后，已验证可匿名访问与匿名克隆（即 `/plugin marketplace add` 所做的动作），结构校验全通过。

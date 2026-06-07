@@ -8,10 +8,16 @@ hangwenlei 的个人 Claude Code 技能商店（marketplace）。
 
 ### 安装
 
+> ⚠️ `/plugin` 命令**只在 Claude Code CLI（终端版）里可用**。桌面/GUI 客户端通常没有这个命令——请在**终端**里安装。
+
+在 Claude Code CLI 终端运行：
+
 ```
 /plugin marketplace add hangwenlei/My-Skills
 /plugin install chinese@my-skills
 ```
+
+**GUI 客户端也能用**：CLI 与 GUI 客户端共用同一个 `~/.claude/` 目录，插件信息写在 `~/.claude/plugins/` 注册表里。所以在 CLI 装好后，**重启一下 GUI 客户端**，它就会加载这个插件，`/chinese:init` 在两边都能用。
 
 ### 使用
 
@@ -27,10 +33,13 @@ hangwenlei 的个人 Claude Code 技能商店（marketplace）。
 
 ### 更新
 
+在 Claude Code CLI 终端运行：
+
 ```
 /plugin marketplace update my-skills
 ```
 
-### 说明
+### 常见问题
 
-命令带 `chinese:` 前缀是 Claude Code 插件机制决定的（插件命令强制带命名空间），无法去掉。
+- **命令为什么带 `chinese:` 前缀？** 这是 Claude Code 插件机制决定的——插件命令强制带命名空间（`/<插件名>:<skill名>`），无法去掉。
+- **GUI 客户端的「Directory」搜索框搜不到本插件？** 属正常。那个目录只展示官方精选（Anthropic & Partners）内容，不索引个人 GitHub 仓库。安装请走上面的 CLI 方式；装好后 `/chinese:init` 命令照常生效，不依赖该目录。
