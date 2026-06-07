@@ -1,0 +1,14 @@
+{
+  "name": "my-skills",
+  "owner": {
+    "name": "hangwenlei"
+  },
+  "description": "hangwenlei 的个人 Claude Code 技能商店",
+  "plugins": [
+    {
+      "name": "chinese",
+      "source": "./plugins/chinese",
+      "description": "把当前项目切换到中文输出模式"
+    }
+  ]
+}
