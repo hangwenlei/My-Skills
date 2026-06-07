@@ -16,7 +16,7 @@ Check (Test-Path $sk) 'SKILL.md 存在'
 Check (Test-Path $rd) 'README.md 存在'
 
 if (Test-Path $mp) {
-  $m = Get-Content $mp -Raw | ConvertFrom-Json
+  $m = Get-Content $mp -Raw -Encoding UTF8 | ConvertFrom-Json
   Check ($m.name -eq 'my-skills') 'marketplace name = my-skills'
   Check ($null -ne $m.owner) 'marketplace 有 owner'
   $cn = $m.plugins | Where-Object { $_.name -eq 'chinese' }
@@ -28,13 +28,13 @@ if (Test-Path $mp) {
 }
 
 if (Test-Path $pj) {
-  $p = Get-Content $pj -Raw | ConvertFrom-Json
+  $p = Get-Content $pj -Raw -Encoding UTF8 | ConvertFrom-Json
   Check ($p.name -eq 'chinese') 'plugin name = chinese'
   Check (-not [string]::IsNullOrWhiteSpace($p.description)) 'plugin 有 description'
 }
 
 if (Test-Path $sk) {
-  $c = Get-Content $sk -Raw
+  $c = Get-Content $sk -Raw -Encoding UTF8
   Check ($c -match '(?m)^name:\s*init\s*$') 'SKILL.md frontmatter name = init'
   Check ($c -match 'disable-model-invocation:\s*true') 'SKILL.md disable-model-invocation = true'
   Check ($c -match 'chinese:init start') 'SKILL.md 含哨兵标记'
