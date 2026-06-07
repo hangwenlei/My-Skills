@@ -9,6 +9,11 @@
       "name": "chinese",
       "source": "./plugins/chinese",
       "description": "把当前项目切换到中文输出模式"
+    },
+    {
+      "name": "sync",
+      "source": "./plugins/sync",
+      "description": "固化开发现场到 HANDOFF.md 并刷新文档，支持新 session 无缝续接"
     }
   ]
 }
