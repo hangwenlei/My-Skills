@@ -53,7 +53,7 @@ Check (Test-Path $sk) 'SKILL.md 存在'
 Check (Test-Path $rd) 'README.md 存在'
 
 if (Test-Path $mp) {
-  $m = Get-Content $mp -Raw | ConvertFrom-Json
+  $m = Get-Content $mp -Raw -Encoding UTF8 | ConvertFrom-Json
   Check ($m.name -eq 'my-skills') 'marketplace name = my-skills'
   Check ($null -ne $m.owner) 'marketplace 有 owner'
   $cn = $m.plugins | Where-Object { $_.name -eq 'chinese' }
@@ -65,13 +65,13 @@ if (Test-Path $mp) {
 }
 
 if (Test-Path $pj) {
-  $p = Get-Content $pj -Raw | ConvertFrom-Json
+  $p = Get-Content $pj -Raw -Encoding UTF8 | ConvertFrom-Json
   Check ($p.name -eq 'chinese') 'plugin name = chinese'
   Check (-not [string]::IsNullOrWhiteSpace($p.description)) 'plugin 有 description'
 }
 
 if (Test-Path $sk) {
-  $c = Get-Content $sk -Raw
+  $c = Get-Content $sk -Raw -Encoding UTF8
   Check ($c -match '(?m)^name:\s*init\s*$') 'SKILL.md frontmatter name = init'
   Check ($c -match 'disable-model-invocation:\s*true') 'SKILL.md disable-model-invocation = true'
   Check ($c -match 'chinese:init start') 'SKILL.md 含哨兵标记'
@@ -80,6 +80,12 @@ if (Test-Path $sk) {
 if ($script:fail -gt 0) { Write-Host "`n$script:fail 项失败"; exit 1 }
 else { Write-Host "`n全部通过"; exit 0 }
 ```
+
+> **编码注意**：Windows PowerShell 5.1 默认按 ANSI(GBK) 读取无 BOM 的 `.ps1`，含中文会乱码报错。保存本脚本后需转存为 **UTF-8 with BOM**：
+> ```
+> $p='tests\validate-plugin.ps1'; $t=Get-Content -Raw -Encoding UTF8 $p; [System.IO.File]::WriteAllText((Resolve-Path $p), $t, (New-Object System.Text.UTF8Encoding $true))
+> ```
+> 读取含中文的 JSON/Markdown 时也必须带 `-Encoding UTF8`（已在脚本中体现），否则 `ConvertFrom-Json` 会因乱码吃掉引号而解析失败。
 
 - [ ] **Step 2: 运行校验脚本，确认它失败**
 
