@@ -1,0 +1,8 @@
+{
+  "name": "sync",
+  "version": "1.0.0",
+  "description": "把当前开发现场固化进 HANDOFF.md 并挂到 CLAUDE.md 自动加载，同时按确认刷新其它文档，便于新 session 无缝续接",
+  "author": {
+    "name": "hangwenlei"
+  }
+}
