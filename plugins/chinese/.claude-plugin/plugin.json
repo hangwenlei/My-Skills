@@ -1,0 +1,8 @@
+{
+  "name": "chinese",
+  "version": "1.0.0",
+  "description": "把当前项目切换到中文输出模式：写入 settings.json 的 language 配置并在 CLAUDE.md 写明中文输出规范",
+  "author": {
+    "name": "hangwenlei"
+  }
+}
