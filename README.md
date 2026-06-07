@@ -43,3 +43,32 @@ hangwenlei 的个人 Claude Code 技能商店（marketplace）。
 
 - **命令为什么带 `chinese:` 前缀？** 这是 Claude Code 插件机制决定的——插件命令强制带命名空间（`/<插件名>:<skill名>`），无法去掉。
 - **GUI 客户端的「Directory」搜索框搜不到本插件？** 属正常。那个目录只展示官方精选（Anthropic & Partners）内容，不索引个人 GitHub 仓库。安装请走上面的 CLI 方式；装好后 `/chinese:init` 命令照常生效，不依赖该目录。
+
+## sync 插件
+
+开发到一半想停下来时，运行 `/sync:docs`：把当前开发现场固化进 `HANDOFF.md`，并在 `CLAUDE.md` 挂一行 `@HANDOFF.md` 自动加载；之后新开 session、导入本项目文件夹即可无缝续接。同时它会先列出「建议更新的文档清单」，经你确认后再刷新 README、设计文档等。
+
+### 安装
+
+在 Claude Code CLI 终端运行：
+
+```
+/plugin marketplace add hangwenlei/My-Skills
+/plugin install sync@my-skills
+```
+
+（与 chinese 插件相同：`/plugin` 仅 CLI 可用；CLI 与 GUI 客户端共用 `~/.claude/`，CLI 装好后重启 GUI 客户端即生效。）
+
+### 使用
+
+在项目目录运行：
+
+```
+/sync:docs
+```
+
+它会：
+- 快照式重写项目根 `HANDOFF.md`（概览/已完成/进行中/下一步/关键决策/重要文件/坑/常用命令）；
+- 幂等地在 `CLAUDE.md` 加 `@HANDOFF.md`，让新 session 自动加载；
+- 列出建议更新的其它文档，经你确认后再改；
+- 不自动 commit——改完用 `git diff` 复核后自行提交。
