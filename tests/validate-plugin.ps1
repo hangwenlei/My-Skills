@@ -63,6 +63,7 @@ if (Test-Path $sk2) {
   Check ($c2 -match '可收敛') 'sync SKILL.md 步骤4 含去重类型「可收敛」'
   Check ($c2 -match '可合并') 'sync SKILL.md 步骤4 含去重类型「可合并」'
   Check ($c2 -match '日志型') 'sync SKILL.md 步骤4 含日志型跳过规则'
+  Check ($c2 -match '同一事实只写一条') 'sync SKILL.md 步骤2 含 HANDOFF 自身去重'
 }
 
 if ($script:fail -gt 0) { Write-Host "`n$script:fail 项失败"; exit 1 }
