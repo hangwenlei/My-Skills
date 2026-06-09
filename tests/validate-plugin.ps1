@@ -59,6 +59,7 @@ if (Test-Path $sk2) {
   Check ($c2 -match '(?m)^name:\s*docs\s*$') 'sync SKILL.md name = docs'
   Check ($c2 -match 'disable-model-invocation:\s*true') 'sync SKILL.md disable-model-invocation = true'
   Check ($c2 -match 'HANDOFF\.md') 'sync SKILL.md 提及 HANDOFF.md'
+  # 以下为去重特性的存在性检查（presence check）：确认关键词在 SKILL.md 中存在
   Check ($c2 -match '可收敛') 'sync SKILL.md 步骤4 含去重类型「可收敛」'
   Check ($c2 -match '可合并') 'sync SKILL.md 步骤4 含去重类型「可合并」'
   Check ($c2 -match '日志型') 'sync SKILL.md 步骤4 含日志型跳过规则'
