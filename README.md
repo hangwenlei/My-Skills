@@ -31,14 +31,6 @@ hangwenlei 的个人 Claude Code 技能商店（marketplace）。
 - 在 `.claude/settings.json` 写入 `"language": "chinese"`（保留其它已有配置）；
 - 在项目根 `CLAUDE.md` 写入「中文输出规范」（用标记包裹，重复运行不会重复堆叠）。
 
-### 更新
-
-在 Claude Code CLI 终端运行：
-
-```
-/plugin marketplace update my-skills
-```
-
 ### 常见问题
 
 - **命令为什么带 `chinese:` 前缀？** 这是 Claude Code 插件机制决定的——插件命令强制带命名空间（`/<插件名>:<skill名>`），无法去掉。
@@ -72,3 +64,14 @@ hangwenlei 的个人 Claude Code 技能商店（marketplace）。
 - 幂等地在 `CLAUDE.md` 加 `@HANDOFF.md`，让新 session 自动加载；
 - 列出建议更新/收敛的其它文档（含跨文档去重，日志/时间线型自动跳过），经你确认后再改；
 - 不自动 commit——改完用 `git diff` 复核后自行提交。
+
+## 更新插件（chinese / sync 通用）
+
+注意：只刷新商店清单**不会**升级已安装的插件，完整更新分两步。在终端运行：
+
+```
+claude plugin marketplace update my-skills
+claude plugin update <插件名>@my-skills
+```
+
+第一步刷新商店清单；第二步把已安装插件升级到新版，例如 `claude plugin update sync@my-skills`。最后在 Claude Code 里运行 `/reload-plugins` 或重启客户端，新版即生效。
