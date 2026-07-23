@@ -30,6 +30,7 @@ function Remove-Whitespace($text) {
 
 function Test-YamlPolicyFalse($text, $key) {
   $inPolicy = $false
+  $directIndent = $null
   foreach ($line in @($text -split '\r?\n')) {
     if ($line -eq 'policy:') {
       $inPolicy = $true
@@ -38,8 +39,20 @@ function Test-YamlPolicyFalse($text, $key) {
     if ($inPolicy -and $line -match '^\S') {
       return $false
     }
-    if ($inPolicy -and
-        $line -match "^\s+$([regex]::Escape($key)):\s*false\s*$") {
+    if (-not $inPolicy -or [string]::IsNullOrWhiteSpace($line) -or
+        $line -match '^\s*#') {
+      continue
+    }
+    $indentMatch = [regex]::Match($line, '^(?<indent>[ \t]+)')
+    if (-not $indentMatch.Success) {
+      return $false
+    }
+    $indent = $indentMatch.Groups['indent'].Value.Length
+    if ($null -eq $directIndent) {
+      $directIndent = $indent
+    }
+    if ($indent -eq $directIndent -and
+        $line -match "^[ \t]{$directIndent}$([regex]::Escape($key)):\s*false\s*$") {
       return $true
     }
   }
@@ -220,6 +233,8 @@ if (Should-Run 'sync') {
   if (Test-Path -LiteralPath $codexSkillPath) {
     $content = Get-Content -LiteralPath $codexSkillPath -Raw -Encoding UTF8
     $normalized = Remove-Whitespace $content
+    $evidenceGateIndex = $content.IndexOf('## 敏感信息与证据读取闸门')
+    $collectionStepIndex = $content.IndexOf('## 步骤 1：收集现场状态')
     Check ($content -notmatch '(?m)^disable-model-invocation:') `
       'sync Codex 核心无 Claude-only disable-model-invocation'
     Check ($content -notmatch '(?m)^allowed-tools:') `
@@ -239,14 +254,43 @@ if (Should-Run 'sync') {
     Check ($content -match '可合并') 'sync 保留可合并'
     Check ($content -match '日志型') 'sync 保留日志型跳过'
     Check ($content -match '同一事实只写一条') 'sync 保留 HANDOFF 去重'
+    Check ($evidenceGateIndex -ge 0 -and
+           $collectionStepIndex -ge 0 -and
+           $evidenceGateIndex -lt $collectionStepIndex) `
+      'sync 在收集现场前建立敏感信息与证据读取闸门'
+    Check ($normalized.Contains(
+      '该保护必须发生在任何原始diff正文或测试stdout/stderr进入任务上下文或用户输出之前。')) `
+      'sync 在原始内容进入上下文前保护'
+    Check ($normalized.Contains(
+      '默认只读取不含正文的安全元数据，包括status、name-status、stat和numstat。')) `
+      'sync 默认只读取安全元数据'
+    Check ($normalized.Contains(
+      '禁止把原始diff正文或测试stdout/stderr直接返回任务上下文或用户。')) `
+      'sync 禁止直接返回原始 diff 与测试输出'
+    Check ($normalized.Contains(
+      '需要内容时，必须在同一个本地命令或工具调用内捕获原始输出、完成敏感扫描与脱敏，并且只返回脱敏结果。')) `
+      'sync 要求同调用内完成过滤'
+    Check ($normalized.Contains(
+      '原始输出只能留在该本地进程的内存或系统临时文件中；临时文件必须在finally中安全删除并做删除后断言。')) `
+      'sync 限制 raw 暂存并要求 finally 清理'
+    Check ($normalized.Contains(
+      '在WindowsPowerShell5.1中不要依赖直接`2>&1`作为隔离边界；应使用`System.Diagnostics.Process`重定向标准输出和错误，或使用等价的可靠本地捕获。')) `
+      'sync 避免 PowerShell 5.1 native stderr 提前泄露'
+    Check ($normalized.Contains(
+      '如果没有可靠的本地过滤能力，跳过原始内容读取，只基于安全元数据继续并明确报告限制；绝不降级为直接输出。')) `
+      'sync 无可靠过滤时禁止降级'
+    Check ($content -notmatch
+      '(?m)^- `git diff` 与 `git diff --staged`\s*$') `
+      'sync 默认收集不直接读取 raw diff'
     Check ($normalized.Contains(
       '不得把token、密码、私钥、连接串、带凭据URL、订阅链接、cookie或session等敏感值写入HANDOFF.md、其它文档或用户可见摘要。')) `
       'sync 禁止持久化或复述敏感值'
     Check ($normalized.Contains(
       '只记录存在敏感配置、所在文件和需要人工处理，不记录或复述具体值；无法判断时按敏感信息处理并脱敏。')) `
       'sync 对敏感信息只记录位置并默认脱敏'
-    Check ($content -match '(?m)^- Git 项目在应用确认项后.*`git diff`') `
-      'sync Git 项目确认后读取实际 diff'
+    Check ($normalized.Contains(
+      'Git项目在应用确认项后先读取相关安全diff元数据；只有在敏感信息闸门内完成本地过滤后，才能读取脱敏正文。')) `
+      'sync Git 项目确认后也遵守证据读取闸门'
     Check ($content -match '(?m)^- 非 Git 项目禁止执行 Git 命令；') `
       'sync 非 Git 项目全程禁止 Git 命令'
     Check ($content -match '\*\*修改前 UTF-8 快照\*\*') `
@@ -259,6 +303,15 @@ if (Should-Run 'sync') {
     $openai = Get-Content -LiteralPath $openaiPath -Raw -Encoding UTF8
     Check (Test-YamlPolicyFalse $openai 'allow_implicit_invocation') `
       'sync policy 结构禁止 Codex 隐式调用'
+    $nestedPolicyFixture = @"
+policy:
+  nested:
+    allow_implicit_invocation: false
+"@
+    $nestedPolicyAccepted = Test-YamlPolicyFalse `
+      $nestedPolicyFixture 'allow_implicit_invocation'
+    Check (-not $nestedPolicyAccepted) `
+      'sync policy helper 拒绝 nested 假阳性'
     Check ($openai -match '\$sync:docs') 'sync 默认提示包含显式入口'
   }
 }
