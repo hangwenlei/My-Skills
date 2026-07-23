@@ -144,17 +144,50 @@ if (Should-Run 'chinese') {
 }
 
 if (Should-Run 'sync') {
-  $skill = Join-Path $root 'plugins\sync\skills\docs\SKILL.md'
-  Check (Test-Path -LiteralPath $skill) 'sync SKILL.md 存在'
-  if (Test-Path -LiteralPath $skill) {
-    $content = Get-Content -LiteralPath $skill -Raw -Encoding UTF8
-    Check ($content -match '(?m)^name:\s*docs\s*$') 'sync SKILL.md name = docs'
-    Check ($content -match 'disable-model-invocation:\s*true') 'sync SKILL.md disable-model-invocation = true'
-    Check ($content -match 'HANDOFF\.md') 'sync SKILL.md 提及 HANDOFF.md'
-    Check ($content -match '可收敛') 'sync SKILL.md 步骤4 含去重类型「可收敛」'
-    Check ($content -match '可合并') 'sync SKILL.md 步骤4 含去重类型「可合并」'
-    Check ($content -match '日志型') 'sync SKILL.md 步骤4 含日志型跳过规则'
-    Check ($content -match '同一事实只写一条') 'sync SKILL.md 步骤2 含 HANDOFF 自身去重'
+  $claudeSkillPath = Join-Path $root 'plugins\sync\skills\docs\SKILL.md'
+  $codexSkillPath = Join-Path $root 'plugins\sync\codex\skills\docs\SKILL.md'
+  $openaiPath = Join-Path $root 'plugins\sync\codex\skills\docs\agents\openai.yaml'
+  Check (Test-Path -LiteralPath $claudeSkillPath) 'sync Claude 薄入口存在'
+  Check (Test-Path -LiteralPath $codexSkillPath) 'sync 共享核心存在'
+  Check (Test-Path -LiteralPath $openaiPath) 'sync openai.yaml 存在'
+
+  if (Test-Path -LiteralPath $claudeSkillPath) {
+    $claudeContent = Get-Content -LiteralPath $claudeSkillPath -Raw -Encoding UTF8
+    Check ($claudeContent -match '(?m)^disable-model-invocation:\s*true\s*$') `
+      'sync Claude 薄入口保持仅手动调用'
+    Check ($claudeContent -match '(?m)^allowed-tools:') `
+      'sync Claude 薄入口声明工具'
+    Check ($claudeContent -match '/sync:docs') `
+      'sync Claude 薄入口保留 slash 命令'
+    Check ($claudeContent -match
+      '\$\{CLAUDE_PLUGIN_ROOT\}/codex/skills/docs/SKILL\.md') `
+      'sync Claude 薄入口引用唯一共享核心'
+  }
+
+  if (Test-Path -LiteralPath $codexSkillPath) {
+    $content = Get-Content -LiteralPath $codexSkillPath -Raw -Encoding UTF8
+    Check ($content -notmatch '(?m)^disable-model-invocation:') `
+      'sync Codex 核心无 Claude-only disable-model-invocation'
+    Check ($content -notmatch '(?m)^allowed-tools:') `
+      'sync Codex 核心无宿主专属 allowed-tools'
+    Check ($content -match '\$sync:docs') 'sync 核心包含 Codex 显式入口'
+    Check ($content -match '/sync:docs') 'sync 核心包含 Claude 薄入口契约'
+    Check ($content -match 'git rev-parse --show-toplevel') 'sync 会定位 Git 项目根'
+    Check ($content -match '实时 Git、测试和文件状态') 'sync 定义证据优先级'
+    Check ($content -match 'sync:docs start') 'sync 定义 AGENTS 哨兵'
+    Check ($content -match '\$sync:docs 应用 1,3') 'sync 定义 Codex 二阶段入口'
+    Check ($content -match '平台速查') 'sync 含平台速查'
+    Check ($content -match '常见错误') 'sync 含常见错误'
+    Check ($content -match '可收敛') 'sync 保留可收敛'
+    Check ($content -match '可合并') 'sync 保留可合并'
+    Check ($content -match '日志型') 'sync 保留日志型跳过'
+    Check ($content -match '同一事实只写一条') 'sync 保留 HANDOFF 去重'
+  }
+
+  if (Test-Path -LiteralPath $openaiPath) {
+    $openai = Get-Content -LiteralPath $openaiPath -Raw -Encoding UTF8
+    Check ($openai -match 'allow_implicit_invocation:\s*false') 'sync 禁止 Codex 隐式调用'
+    Check ($openai -match '\$sync:docs') 'sync 默认提示包含显式入口'
   }
 }
 

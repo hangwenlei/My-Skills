@@ -1,0 +1,6 @@
+interface:
+  display_name: "同步开发现场"
+  short_description: "为 Codex 固化开发现场并通过确认式流程刷新相关文档"
+  default_prompt: "Use $sync:docs to capture the current development state and refresh related documentation."
+policy:
+  allow_implicit_invocation: false
