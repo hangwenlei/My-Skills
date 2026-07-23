@@ -1,0 +1,23 @@
+{
+  "name": "chinese",
+  "version": "1.1.0",
+  "description": "为项目启用简体中文输出规范",
+  "author": {
+    "name": "hangwenlei",
+    "url": "https://github.com/hangwenlei"
+  },
+  "homepage": "https://github.com/hangwenlei/My-Skills",
+  "repository": "https://github.com/hangwenlei/My-Skills",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Chinese",
+    "shortDescription": "为当前项目启用简体中文输出规范",
+    "longDescription": "幂等维护 Codex 项目的 AGENTS.md，使任务过程、说明与提交信息使用简体中文。",
+    "developerName": "hangwenlei",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "Use $chinese:init to enable Simplified Chinese output for this project."
+    ]
+  }
+}

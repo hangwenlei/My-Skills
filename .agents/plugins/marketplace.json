@@ -1,0 +1,32 @@
+{
+  "name": "my-skills",
+  "interface": {
+    "displayName": "My Skills"
+  },
+  "plugins": [
+    {
+      "name": "chinese",
+      "source": {
+        "source": "local",
+        "path": "./plugins/chinese/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "sync",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sync/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
