@@ -264,6 +264,14 @@ if (Should-Run 'sync') {
     Check ($normalized.Contains(
       '默认只读取不含正文的安全元数据，包括status、name-status、stat和numstat。')) `
       'sync 默认只读取安全元数据'
+    Check ($content -match [regex]::Escape(
+      '`git log --format="%h %ad" --date=short -15`')) `
+      'sync 默认提交历史仅含 hash 与日期'
+    Check ($content -notmatch '(?m)^- `git log --oneline -15`\s*$') `
+      'sync 默认提交历史不读取 subject'
+    Check ($normalized.Contains(
+      '需要commitsubject时，必须复用同一本地调用内捕获、扫描、脱敏的证据闸门。')) `
+      'sync commit subject 复用证据读取闸门'
     Check ($normalized.Contains(
       '禁止把原始diff正文或测试stdout/stderr直接返回任务上下文或用户。')) `
       'sync 禁止直接返回原始 diff 与测试输出'

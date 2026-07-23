@@ -74,12 +74,13 @@ Git 项目默认只运行并阅读下列安全元数据命令：
 - `git diff --name-status` 与 `git diff --staged --name-status`
 - `git diff --stat` 与 `git diff --staged --stat`
 - `git diff --numstat` 与 `git diff --staged --numstat`
-- `git log --oneline -15`
+- `git log --format="%h %ad" --date=short -15`
 
 不要默认读取 content-bearing diff。若确有必要读取 diff 正文，按上面的闸门在
 同一本地调用中捕获、扫描并只返回脱敏内容。需要运行或读取测试时同样禁止
 stdout/stderr 直通：本地调用先捕获输出，只返回 exit code、脱敏后的测试摘要和
 固定错误信息；无法可靠过滤时只记录“测试输出未读取”及其限制。
+需要 commit subject 时，必须复用同一本地调用内捕获、扫描、脱敏的证据闸门。
 
 再读取已存在的 `HANDOFF.md`，并结合当前对话中的已完成事项、关键决策和
 下一步；读取和后续引用仍受上述闸门约束。若当前目录不是 Git 仓库，跳过全部
