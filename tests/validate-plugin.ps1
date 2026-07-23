@@ -101,13 +101,45 @@ if (Should-Run 'distribution') {
 }
 
 if (Should-Run 'chinese') {
-  $skill = Join-Path $root 'plugins\chinese\skills\init\SKILL.md'
-  Check (Test-Path -LiteralPath $skill) 'chinese SKILL.md 存在'
-  if (Test-Path -LiteralPath $skill) {
-    $content = Get-Content -LiteralPath $skill -Raw -Encoding UTF8
-    Check ($content -match '(?m)^name:\s*init\s*$') 'chinese SKILL.md name = init'
-    Check ($content -match 'disable-model-invocation:\s*true') 'chinese SKILL.md disable-model-invocation = true'
-    Check ($content -match 'chinese:init start') 'chinese SKILL.md 含哨兵标记'
+  $claudeSkillPath = Join-Path $root 'plugins\chinese\skills\init\SKILL.md'
+  $codexSkillPath = Join-Path $root 'plugins\chinese\codex\skills\init\SKILL.md'
+  $openaiPath = Join-Path $root 'plugins\chinese\codex\skills\init\agents\openai.yaml'
+  Check (Test-Path -LiteralPath $claudeSkillPath) 'chinese Claude 薄入口存在'
+  Check (Test-Path -LiteralPath $codexSkillPath) 'chinese 共享核心存在'
+  Check (Test-Path -LiteralPath $openaiPath) 'chinese openai.yaml 存在'
+
+  if (Test-Path -LiteralPath $claudeSkillPath) {
+    $claudeContent = Get-Content -LiteralPath $claudeSkillPath -Raw -Encoding UTF8
+    Check ($claudeContent -match '(?m)^disable-model-invocation:\s*true\s*$') `
+      'chinese Claude 薄入口保持仅手动调用'
+    Check ($claudeContent -match '(?m)^allowed-tools:') `
+      'chinese Claude 薄入口声明工具'
+    Check ($claudeContent -match '/chinese:init') `
+      'chinese Claude 薄入口保留 slash 命令'
+    Check ($claudeContent -match
+      '\$\{CLAUDE_PLUGIN_ROOT\}/codex/skills/init/SKILL\.md') `
+      'chinese Claude 薄入口引用唯一共享核心'
+  }
+
+  if (Test-Path -LiteralPath $codexSkillPath) {
+    $content = Get-Content -LiteralPath $codexSkillPath -Raw -Encoding UTF8
+    Check ($content -notmatch '(?m)^disable-model-invocation:') `
+      'chinese Codex 核心无 Claude-only disable-model-invocation'
+    Check ($content -notmatch '(?m)^allowed-tools:') `
+      'chinese Codex 核心无宿主专属 allowed-tools'
+    Check ($content -match '\$chinese:init') 'chinese 核心包含 Codex 显式入口'
+    Check ($content -match '/chinese:init') 'chinese 核心包含 Claude 薄入口契约'
+    Check ($content -match 'git rev-parse --show-toplevel') 'chinese 会定位 Git 项目根'
+    Check ($content -match 'AGENTS\.md') 'chinese 包含 Codex AGENTS 分支'
+    Check ($content -match '单边哨兵') 'chinese 会保护损坏哨兵'
+    Check ($content -match '平台速查') 'chinese 含平台速查'
+    Check ($content -match '常见错误') 'chinese 含常见错误'
+  }
+
+  if (Test-Path -LiteralPath $openaiPath) {
+    $openai = Get-Content -LiteralPath $openaiPath -Raw -Encoding UTF8
+    Check ($openai -match 'allow_implicit_invocation:\s*false') 'chinese 禁止 Codex 隐式调用'
+    Check ($openai -match '\$chinese:init') 'chinese 默认提示包含显式入口'
   }
 }
 
