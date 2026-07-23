@@ -1,7 +1,7 @@
 # Claude Code / Codex 双平台兼容设计
 
 - 日期：2026-07-23
-- 状态：实施完成；发布、本机升级与 runtime smoke 待执行
+- 状态：双平台实现、远端发布、本机 Codex 升级和 Codex runtime smoke 已完成；Claude runtime smoke 因 CLI 未安装而未执行
 - 仓库：https://github.com/hangwenlei/My-Skills
 - 范围：`chinese` 与 `sync` 两个插件、双平台 marketplace、验证、发布及本机 Codex 升级
 
@@ -160,7 +160,16 @@ My-Skills/
 - 只从 Claude `/sync:docs` 手动薄入口或 Codex `$sync:docs`/`/skills`
   显式入口进入；核心流程脱离入口时不写文件。
 - 先定位项目根。
-- 读取 `git status`、未暂存与已暂存 diff、最近提交、旧 `HANDOFF.md` 和当前对话。
+- 默认只读取不含正文的安全元数据，包括 Git status、name-status、stat、
+  numstat，以及不含 commit subject 的 hash/date 历史；旧 `HANDOFF.md` 和
+  当前对话也必须先经过敏感信息筛查。
+- raw diff 或测试输出只有在同一个本地调用内完成捕获、扫描和完整脱敏后才能
+  返回；Windows PowerShell 5.1 使用 `System.Diagnostics.Process` 或等价的
+  stdout/stderr 隔离机制，不让原始内容先进入任务上下文。
+- raw 内容优先只保留在本地进程内存；若必须使用系统临时文件，只有在精确路径
+  和 reparse point 安全检查通过后才能清理，并在清理后断言目标不存在。
+- 过滤、子命令或清理失败时 fail closed，不回显 raw 内容；只返回固定错误摘要
+  和非敏感路径，保留现场供诊断。
 - 实时 Git、测试和文件状态优先于旧 HANDOFF；旧 HANDOFF 只作为线索。
 - 非 Git 项目跳过 Git 命令，仍可依据对话与文件生成交接。
 
@@ -185,7 +194,8 @@ My-Skills/
 - 继续执行时使用平台原生显式入口：
   - Claude：`/sync:docs 应用 1,3`
   - Codex：`$sync:docs 应用 1,3`
-- 完成后实际读取并摘要相关 `git diff`，而不是只让用户自行运行命令。
+- 完成后先读取相关安全 diff 元数据；只有在上述证据闸门内完成同调用捕获、
+  扫描和完整脱敏后，才能返回正文摘要。
 - Skill 自身不执行 commit。
 
 ## 7. 仓库文档处理
@@ -247,6 +257,10 @@ My-Skills/
 - 旧 HANDOFF 与实时 Git 冲突时，以实时证据为准。
 
 ## 9. 发布与本机升级
+
+本节所列流程已执行完成：实现已发布到远端 `main`，本机 Codex marketplace
+和两个插件已升级，并已用全新 `codex exec --ephemeral` 进程完成 Codex
+runtime smoke。Claude CLI 未安装，因此 Claude runtime smoke 未执行。
 
 ### 9.1 发布前门槛
 

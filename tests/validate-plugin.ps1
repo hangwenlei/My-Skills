@@ -331,11 +331,17 @@ if (Should-Run 'docs') {
   $readmePath = Join-Path $root 'README.md'
   $designPath = Join-Path $root `
     'docs\superpowers\specs\2026-07-23-claude-codex-dual-compat-design.md'
+  $planPath = Join-Path $root `
+    'docs\superpowers\plans\2026-07-23-claude-codex-dual-compat.md'
+  $verificationPath = Join-Path $root `
+    'docs\superpowers\verification\2026-07-23-claude-codex-skill-tests.md'
   Check (Test-Path -LiteralPath $agentsPath) 'AGENTS.md 存在'
   Check (Test-Path -LiteralPath $claudePath) 'CLAUDE.md 存在'
   Check (Test-Path -LiteralPath $settingsPath) '.claude/settings.json 存在'
   Check (Test-Path -LiteralPath $readmePath) 'README.md 存在'
   Check (Test-Path -LiteralPath $designPath) '双平台设计文档存在'
+  Check (Test-Path -LiteralPath $planPath) '双平台实施计划存在'
+  Check (Test-Path -LiteralPath $verificationPath) '双平台验证证据存在'
 
   if (Test-Path -LiteralPath $agentsPath) {
     $agents = Get-Content -LiteralPath $agentsPath -Raw -Encoding UTF8
@@ -382,7 +388,42 @@ if (Should-Run 'docs') {
 
   if (Test-Path -LiteralPath $designPath) {
     $design = Get-Content -LiteralPath $designPath -Raw -Encoding UTF8
+    $designNormalized = Remove-Whitespace $design
     Check ($design -notmatch '实施计划待执行') '设计状态不再声称实施计划待执行'
+    Check ($designNormalized.Contains(
+      '状态：双平台实现、远端发布、本机Codex升级和Codexruntimesmoke已完成；Clauderuntimesmoke因CLI未安装而未执行')) `
+      '设计状态反映发布、升级与 Codex runtime 已完成及 Claude runtime 未执行'
+    Check ($designNormalized.Contains(
+      '默认只读取不含正文的安全元数据')) `
+      '设计默认只收集不含正文的安全元数据'
+    Check ($designNormalized.Contains(
+      'rawdiff或测试输出只有在同一个本地调用内完成捕获、扫描和完整脱敏后才能返回')) `
+      '设计要求 raw 证据在同一本地调用内完整脱敏'
+    Check ($designNormalized.Contains(
+      '过滤、子命令或清理失败时failclosed，不回显raw内容')) `
+      '设计定义敏感证据失败时 fail closed'
+    Check ($designNormalized -notmatch
+      '读取`gitstatus`、未暂存与已暂存diff') `
+      '设计不再无条件读取 staged/unstaged raw diff'
+    Check ($designNormalized -notmatch
+      '完成后实际读取并摘要相关`gitdiff`') `
+      '设计不再要求完成后直接读取并摘要 raw git diff'
+  }
+
+  foreach ($portableDocument in @(
+    @{ Label = '实施计划'; Path = $planPath }
+    @{ Label = '验证证据'; Path = $verificationPath }
+  )) {
+    if (Test-Path -LiteralPath $portableDocument.Path) {
+      $portableContent = Get-Content -LiteralPath $portableDocument.Path `
+        -Raw -Encoding UTF8
+      Check ($portableContent -notmatch '(?i)[A-Z]:\\Users\\') `
+        "$($portableDocument.Label) 不含反斜杠机器用户路径"
+      Check ($portableContent -notmatch '(?i)[A-Z]:/Users/') `
+        "$($portableDocument.Label) 不含正斜杠机器用户路径"
+      Check ($portableContent -notmatch '(?<!\d)82370(?!\d)') `
+        "$($portableDocument.Label) 不含机器用户名片段"
+    }
   }
 }
 

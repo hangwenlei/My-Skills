@@ -673,11 +673,13 @@ Invoke-NativeChecked 'chinese 静态测试' {
 }
 $env:PYTHONUTF8 = '1'
 Invoke-NativeChecked 'chinese quick_validate' {
-  python C:\Users\82370\.codex\skills\.system\skill-creator\scripts\quick_validate.py `
+  python (Join-Path $env:USERPROFILE `
+    '.codex\skills\.system\skill-creator\scripts\quick_validate.py') `
     plugins\chinese\codex\skills\init
 }
 Invoke-NativeChecked 'chinese validate_plugin' {
-  python C:\Users\82370\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py `
+  python (Join-Path $env:USERPROFILE `
+    '.codex\skills\.system\plugin-creator\scripts\validate_plugin.py') `
     plugins\chinese\codex
 }
 ```
@@ -1010,11 +1012,13 @@ Invoke-NativeChecked 'sync 静态测试' {
 }
 $env:PYTHONUTF8 = '1'
 Invoke-NativeChecked 'sync quick_validate' {
-  python C:\Users\82370\.codex\skills\.system\skill-creator\scripts\quick_validate.py `
+  python (Join-Path $env:USERPROFILE `
+    '.codex\skills\.system\skill-creator\scripts\quick_validate.py') `
     plugins\sync\codex\skills\docs
 }
 Invoke-NativeChecked 'sync validate_plugin' {
-  python C:\Users\82370\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py `
+  python (Join-Path $env:USERPROFILE `
+    '.codex\skills\.system\plugin-creator\scripts\validate_plugin.py') `
     plugins\sync\codex
 }
 ```
@@ -1395,11 +1399,13 @@ Expected: exit `0`、无 FAIL、最终 `全部通过`。
 ```powershell
 $env:PYTHONUTF8 = '1'
 Invoke-NativeChecked 'chinese skill 校验' {
-  python C:\Users\82370\.codex\skills\.system\skill-creator\scripts\quick_validate.py `
+  python (Join-Path $env:USERPROFILE `
+    '.codex\skills\.system\skill-creator\scripts\quick_validate.py') `
     plugins\chinese\codex\skills\init
 }
 Invoke-NativeChecked 'sync skill 校验' {
-  python C:\Users\82370\.codex\skills\.system\skill-creator\scripts\quick_validate.py `
+  python (Join-Path $env:USERPROFILE `
+    '.codex\skills\.system\skill-creator\scripts\quick_validate.py') `
     plugins\sync\codex\skills\docs
 }
 ```
@@ -1411,11 +1417,13 @@ Expected: 两次均 `Skill is valid!`。
 ```powershell
 $env:PYTHONUTF8 = '1'
 Invoke-NativeChecked 'chinese plugin 校验' {
-  python C:\Users\82370\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py `
+  python (Join-Path $env:USERPROFILE `
+    '.codex\skills\.system\plugin-creator\scripts\validate_plugin.py') `
     plugins\chinese\codex
 }
 Invoke-NativeChecked 'sync plugin 校验' {
-  python C:\Users\82370\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py `
+  python (Join-Path $env:USERPROFILE `
+    '.codex\skills\.system\plugin-creator\scripts\validate_plugin.py') `
     plugins\sync\codex
 }
 ```
@@ -1765,7 +1773,8 @@ foreach ($expected in @(
   }
 }
 
-$snapshotRoot = 'C:\Users\82370\.codex\.tmp\marketplaces\my-skills'
+$snapshotRoot = Join-Path $env:USERPROFILE `
+  '.codex\.tmp\marketplaces\my-skills'
 $nativeCatalogPath = Join-Path $snapshotRoot '.agents\plugins\marketplace.json'
 $installReceiptPath = Join-Path $snapshotRoot '.codex-marketplace-install.json'
 $nativeCatalog = Get-Content -LiteralPath $nativeCatalogPath -Raw -Encoding UTF8 |
@@ -1788,10 +1797,14 @@ if ($receipt.revision -ne $publishedSha) {
   throw "marketplace revision 与已发布实现不一致：$($receipt.revision) / $publishedSha"
 }
 
-$chineseManifest = 'C:\Users\82370\.codex\plugins\cache\my-skills\chinese\1.1.0\.codex-plugin\plugin.json'
-$syncManifest = 'C:\Users\82370\.codex\plugins\cache\my-skills\sync\1.2.0\.codex-plugin\plugin.json'
-$chineseSkill = 'C:\Users\82370\.codex\plugins\cache\my-skills\chinese\1.1.0\skills\init\SKILL.md'
-$syncSkill = 'C:\Users\82370\.codex\plugins\cache\my-skills\sync\1.2.0\skills\docs\SKILL.md'
+$chineseManifest = Join-Path $env:USERPROFILE `
+  '.codex\plugins\cache\my-skills\chinese\1.1.0\.codex-plugin\plugin.json'
+$syncManifest = Join-Path $env:USERPROFILE `
+  '.codex\plugins\cache\my-skills\sync\1.2.0\.codex-plugin\plugin.json'
+$chineseSkill = Join-Path $env:USERPROFILE `
+  '.codex\plugins\cache\my-skills\chinese\1.1.0\skills\init\SKILL.md'
+$syncSkill = Join-Path $env:USERPROFILE `
+  '.codex\plugins\cache\my-skills\sync\1.2.0\skills\docs\SKILL.md'
 foreach ($path in @($chineseManifest, $syncManifest, $chineseSkill, $syncSkill)) {
   if (-not (Test-Path -LiteralPath $path)) {
     throw "本机插件缓存缺少：$path"
@@ -1966,8 +1979,9 @@ if ($finalHead -ne $finalOrigin) {
   throw "最终 HEAD 与 origin/main 不一致：$finalHead / $finalOrigin"
 }
 
-$finalReceipt = Get-Content -LiteralPath `
-  'C:\Users\82370\.codex\.tmp\marketplaces\my-skills\.codex-marketplace-install.json' `
+$finalReceiptPath = Join-Path $env:USERPROFILE `
+  '.codex\.tmp\marketplaces\my-skills\.codex-marketplace-install.json'
+$finalReceipt = Get-Content -LiteralPath $finalReceiptPath `
   -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($finalReceipt.revision -ne $finalHead) {
   throw "最终 marketplace revision 与 HEAD 不一致：$($finalReceipt.revision) / $finalHead"
