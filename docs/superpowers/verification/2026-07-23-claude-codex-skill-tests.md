@@ -5761,3 +5761,483 @@ REFACTOR_VALIDATE_PLUGIN_EXIT=0
 人工复核：REFACTOR variant 5/5 零 sync 写入，5/5 提示至少一个平台原生
 入口；两轮 A–O 的所有完整输出、diff 和关键文件也已由主执行代理逐行读取。
 REFACTOR 复跑保持 GREEN。
+
+## 用户裁决修复：非 Git 二阶段确认与差异摘要
+
+日期：2026-07-23
+
+### 根因
+
+共享核心前段要求非 Git 目录跳过全部 Git 命令，但步骤 4.5 与步骤 5 又无条件
+要求运行并读取 `git diff`。同一 skill 内存在互斥分支冲突，无法明文保证非 Git
+二阶段如何生成实际差异摘要。
+
+用户裁决：
+
+1. Git 项目应用确认项后继续运行并读取相关 `git diff`。
+2. 非 Git 项目禁止 Git 命令；修改前保存相关文件的 UTF-8 内容快照，修改后
+   重新读取并比较。
+3. 用真实非 Git 目录验证首次只提议、确认后只应用选中的其它文档建议，并
+   基于前后快照汇报实际差异。
+
+### 静态 RED
+
+先向 `tests/validate-plugin.ps1` 增加三条契约断言，再运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\validate-plugin.ps1 -Section sync
+```
+
+完整新增断言输出：
+
+```text
+PASS: sync Claude 薄入口存在
+PASS: sync 共享核心存在
+PASS: sync openai.yaml 存在
+PASS: sync Claude 薄入口保持仅手动调用
+PASS: sync Claude 薄入口声明工具
+PASS: sync Claude 薄入口保留 slash 命令
+PASS: sync Claude 薄入口引用唯一共享核心
+PASS: sync Codex 核心无 Claude-only disable-model-invocation
+PASS: sync Codex 核心无宿主专属 allowed-tools
+PASS: sync 核心包含 Codex 显式入口
+PASS: sync 核心包含 Claude 薄入口契约
+PASS: sync 会定位 Git 项目根
+PASS: sync 定义证据优先级
+PASS: sync 定义 AGENTS 哨兵
+PASS: sync 定义 Codex 二阶段入口
+PASS: sync 含平台速查
+PASS: sync 含常见错误
+PASS: sync 保留可收敛
+PASS: sync 保留可合并
+PASS: sync 保留日志型跳过
+PASS: sync 保留 HANDOFF 去重
+FAIL: sync Git 项目确认后读取实际 diff
+FAIL: sync 非 Git 项目全程禁止 Git 命令
+FAIL: sync 非 Git 项目使用 UTF-8 前后快照
+PASS: sync 禁止 Codex 隐式调用
+PASS: sync 默认提示包含显式入口
+
+3 项失败
+EXIT_CODE=1
+```
+
+失败只命中新裁决的三条契约，证明断言不是由语法或夹具错误造成。
+
+### 现有 skill 真实基线
+
+隔离目录：
+`C:\Users\82370\AppData\Local\Temp\my-skills-task3-nongit-two-stage-red`
+
+该目录及全部祖先均无 `.git`。首次显式 `/skills` 选择后，代理新增
+`HANDOFF.md` 与 `AGENTS.md`，提出：
+
+1. `docs/overview.md`：`可收敛`
+2. `docs/quickstart.md`：`过时`
+
+首次阶段三个业务文件全文与哈希保持不变。随后输入：
+
+```text
+用户确认：`$sync:docs 应用 2`。
+```
+
+代理只把 `docs/quickstart.md` 的 `atlas-old` 改为 `atlas sync`，
+`docs/overview.md` 与 README 保持不变，没有执行 Git 命令，并临场使用
+UTF-8 前后内容生成差异。结论：模型在本次基线中选择了安全分支，但这来自
+对冲突指令的临场消歧；静态 RED 证明 skill 尚未明文保证该行为。
+
+### GREEN：真实非 Git 二阶段前向测试
+
+隔离目录：
+`C:\Users\82370\AppData\Local\Temp\my-skills-task3-nongit-two-stage-green`
+
+该目录及全部祖先均无 `.git`。
+
+#### 初始快照
+
+```text
+FILE=docs\overview.md
+SHA256=66CE61F5527679EE9A63126C1A9A593F5326EDA243A1B9EDF19816F3B4440E4C
+---CONTENT---
+# 产品概览
+
+Atlas CLI 用于同步工作区。
+
+Atlas CLI 当前使用 `atlas sync` 同步工作区。
+---END---
+FILE=docs\quickstart.md
+SHA256=ED820BCDD4BEB5B5D39295084521B4D2E6714C967184BFB643849C748BC0857D
+---CONTENT---
+# 快速开始
+
+运行 `atlas-old` 同步工作区。
+---END---
+FILE=README.md
+SHA256=D6BF62BA5F4AF454869BC6AF98E642B1D852575630F52740179628996B5406FD
+---CONTENT---
+# Atlas CLI
+
+Atlas CLI 当前使用 `atlas sync` 同步工作区。
+
+用户入口与产品概览以本文件为准。
+---END---
+```
+
+#### 首次调用输入
+
+```text
+你是 fresh-context Codex 执行代理。请完整读取
+`C:\Users\82370\Desktop\My Skills\plugins\sync\codex\skills\docs\SKILL.md`
+作为本次唯一 sync:docs 业务指令；本消息即表示用户已在 Codex `/skills`
+中显式选择 `sync:docs`。在真实目录
+`C:\Users\82370\AppData\Local\Temp\my-skills-task3-nongit-two-stage-green`
+执行首次同步。该目录不是 Git 仓库。用户任务：固化当前现场，并检查与当前
+Atlas CLI 命令直接相关的其它文档；先给稳定编号建议清单，等待确认。必须
+真实读写文件。首次调用后停止，禁止自行应用建议，不要修改技能或仓库。
+最终只回传：用户可见输出全文、建议编号、实际命令/文件动作逐条清单、
+是否执行任何 Git 命令；无需重复技能全文或所有文件全文。全程简体中文。
+```
+
+允许修改集合：
+
+- 创建/整体刷新 `HANDOFF.md`；
+- 创建/幂等维护当前 Codex 宿主的 `AGENTS.md`。
+
+禁止修改集合：
+
+- `README.md`、`docs/quickstart.md`、`docs/overview.md`；
+- `CLAUDE.md` 和技能仓库；
+- 任何 Git 状态；禁止执行全部 Git 命令。
+
+#### 首次调用完整用户可见输出
+
+```text
+首次同步已完成，并已停在确认点。
+
+- 已创建 `HANDOFF.md`，固化当前 Atlas CLI 文档现场。
+- 已创建 `AGENTS.md`，新 Codex 任务会先读取 `HANDOFF.md`。
+- 两个文件修改前均不存在；新增后已按 UTF-8 回读检查。
+- `README.md`、`docs/overview.md`、`docs/quickstart.md` 均未修改。
+- 本目录不是 Git 仓库，全程未执行任何 Git 命令。
+
+建议清单：
+
+1. `docs/quickstart.md`｜类型：`过时`
+   - 原因：仍使用 `atlas-old`，与 `README.md` 已确认的当前命令
+     `atlas sync` 冲突。
+   - 保留方：`README.md` 中的当前命令事实。
+   - 拟改内容：把 `atlas-old` 替换为 `atlas sync`。
+   - 独有信息核对：快速操作指令仍完整保留，不丢失信息。
+
+2. `docs/overview.md`｜类型：`可收敛`
+   - 原因：重复记录了 `README.md` 已负责维护的当前命令事实。
+   - 保留方：`README.md`。
+   - 拟改内容：保留“Atlas CLI 用于同步工作区”，将重复命令句改为指向
+     根目录 `README.md` 的简短指针。
+   - 独有信息核对：产品用途说明继续保留，当前命令仍可从权威出处找到，
+     不丢失信息。
+
+请复核后使用 `$sync:docs 应用 1,2`，或只填写需要应用的编号。
+未确认项将保持零改动。
+```
+
+实际动作清单（代理原样回传）：
+
+```text
+1. 读取技能文件；首次受默认编码影响，随后以 UTF-8 完整重读。
+2. 递归列出目标目录文件状态。
+3. 以 UTF-8 读取 README.md、docs/overview.md、docs/quickstart.md。
+4. 读取当前时间。
+5. 新增 HANDOFF.md。
+6. 新增 AGENTS.md，写入 Codex 续接区块。
+7. 以 UTF-8 回读新增文件和三份 Atlas 文档。
+8. 对 HANDOFF.md 做一处同义重复收紧。
+9. 未修改技能、仓库或任何编号建议涉及的已有文档。
+Git 命令：未执行，数量为 0。
+```
+
+#### 首次调用后快照
+
+```text
+AGENTS.md
+340D50D5BAD4F3452C8754D17D7C829510F41234FC77B1051E43945B6F278B4F
+docs\overview.md
+66CE61F5527679EE9A63126C1A9A593F5326EDA243A1B9EDF19816F3B4440E4C
+docs\quickstart.md
+ED820BCDD4BEB5B5D39295084521B4D2E6714C967184BFB643849C748BC0857D
+HANDOFF.md
+0CBA2122E1C8FCC8FFE31CE1BD282FC625265C8513619F01369E6A1286B1FC68
+README.md
+D6BF62BA5F4AF454869BC6AF98E642B1D852575630F52740179628996B5406FD
+```
+
+三个初始业务文件哈希与初始快照逐一相同，证明首次只提议而未应用。
+
+#### 二阶段确认输入
+
+```text
+用户确认：`$sync:docs 应用 1`。请在同一目录继续真实执行当前 skill，
+只应用编号 1；完成后停止。最终只回传：用户可见输出全文、实际命令/文件
+动作逐条清单、修改前 UTF-8 快照与修改后内容、实际差异摘要、未选中项
+状态、是否执行任何 Git 命令。不要修改技能或仓库。
+```
+
+允许修改集合：
+
+- 当前现场快照 `HANDOFF.md`；
+- 已确认编号 1 的 `docs/quickstart.md`。
+
+禁止修改集合：
+
+- 未确认编号 2 的 `docs/overview.md`；
+- `README.md`、`AGENTS.md`、`CLAUDE.md` 和技能仓库；
+- 任何 Git 状态；禁止执行全部 Git 命令。
+
+#### 二阶段完整用户可见输出
+
+```text
+已仅应用建议 1，并完成非 Git 内容核对。
+
+- 已更新 `docs/quickstart.md`：`atlas-old` → `atlas sync`。
+- 已整体刷新 `HANDOFF.md`，记录建议 1 已完成、建议 2 仍待确认。
+- `AGENTS.md` 的 Codex 续接区块保持不变；新任务仍会先读取 `HANDOFF.md`。
+- 未选中的建议 2 保持零改动，`docs/overview.md` 内容与修改前快照完全一致。
+- 全程未执行任何 Git 命令，也未执行 commit。
+
+修改前 UTF-8 快照：
+
+`docs/quickstart.md`
+
+# 快速开始
+
+运行 `atlas-old` 同步工作区。
+
+`HANDOFF.md`
+
+# 开发现场交接（HANDOFF）
+
+> 更新时间：2026-07-23 22:26:38 +08:00
+
+## 概览
+
+本目录保存 Atlas CLI 的用户文档，当前处于命令文档一致性检查与待确认收敛阶段。
+
+## ✅ 已完成
+
+- 已读取 `README.md`、`docs/overview.md` 与 `docs/quickstart.md`，并按当前文件状态建立本交接。
+- 已在 `AGENTS.md` 配置 Codex 新任务续接区块。
+
+## 🔄 进行中
+
+- `docs/quickstart.md` 的旧命令与权威说明冲突，`docs/overview.md` 还重复记录命令事实；两项修改建议均等待用户确认。
+
+## ⏭️ 下一步
+
+- 用户确认后，仅应用 `$sync:docs 应用 <编号>` 中选中的建议，并以修改前 UTF-8 快照核对实际差异。
+
+## 🧠 关键决策与理由
+
+- 以 `README.md` 作为用户入口和产品概览的权威出处，因为该文件已明确声明这一职责。
+
+## 📁 重要文件
+
+- `README.md`：Atlas CLI 的用户入口与产品概览。
+- `docs/overview.md`：面向产品概览的补充说明。
+- `docs/quickstart.md`：面向用户的快速操作入口。
+- `AGENTS.md`：Codex 新任务的现场续接规则。
+
+## ⚠️ 注意事项 / 坑
+
+- 本目录不是 Git 仓库；不得执行 Git 命令。
+- 未获确认前，不得修改编号建议涉及的已有文档。
+
+## ▶️ 常用命令
+
+- `atlas sync`：同步工作区。
+
+修改后 UTF-8 内容：
+
+`docs/quickstart.md`
+
+# 快速开始
+
+运行 `atlas sync` 同步工作区。
+
+`HANDOFF.md`
+
+# 开发现场交接（HANDOFF）
+
+> 更新时间：2026-07-23 22:28:52 +08:00
+
+## 概览
+
+本目录保存 Atlas CLI 的用户文档，当前已修正快速开始中的旧命令，剩余一项文档收敛建议待确认。
+
+## ✅ 已完成
+
+- 已按建议 1 更新 `docs/quickstart.md`，使快速操作指令与 `README.md` 的当前说明一致。
+- 已在 `AGENTS.md` 配置 Codex 新任务续接区块。
+
+## 🔄 进行中
+
+- 建议 2 尚未选择：`docs/overview.md` 仍重复记录 `README.md` 维护的命令事实。
+
+## ⏭️ 下一步
+
+- 如需收敛剩余重复内容，使用 `$sync:docs 应用 2`；否则保持现状。
+
+## 🧠 关键决策与理由
+
+- 以 `README.md` 作为用户入口和产品概览的权威出处，因为该文件已明确声明这一职责。
+
+## 📁 重要文件
+
+- `README.md`：Atlas CLI 的用户入口与产品概览。
+- `docs/overview.md`：面向产品概览的补充说明。
+- `docs/quickstart.md`：面向用户的快速操作入口。
+- `AGENTS.md`：Codex 新任务的现场续接规则。
+
+## ⚠️ 注意事项 / 坑
+
+- 本目录不是 Git 仓库；不得执行 Git 命令。
+- 未获确认的建议 2 必须保持零改动。
+
+## ▶️ 常用命令
+
+- `atlas sync`：同步工作区。
+
+实际差异摘要：
+
+- `docs/quickstart.md`：仅替换一处命令，快速开始的结构和独有操作说明均保留。
+- `HANDOFF.md`：更新时间刷新；现场状态由“两项待确认”更新为
+  “建议 1 已完成、建议 2 未选择”；下一步改为可选应用建议 2。
+- `docs/overview.md`、`README.md`、`AGENTS.md` 均未修改。
+
+未选中项状态：
+
+- 建议 2：未应用，保持零改动。
+- `docs/overview.md` 仍为：
+
+# 产品概览
+
+Atlas CLI 用于同步工作区。
+
+Atlas CLI 当前使用 `atlas sync` 同步工作区。
+
+如需继续，可显式调用 `$sync:docs 应用 2`。
+```
+
+实际动作清单（代理原样回传）：
+
+```text
+1. 以 UTF-8 完整读取 sync:docs 技能文件。
+2. 以 UTF-8 完整读取 HANDOFF.md、AGENTS.md、README.md、
+   docs/quickstart.md 和 docs/overview.md。
+3. 在当前任务上下文保存 HANDOFF.md 与 docs/quickstart.md 的修改前
+   UTF-8 快照。
+4. 读取当前时间 2026-07-23 22:28:52 +08:00。
+5. 将 docs/quickstart.md 中的 atlas-old 替换为 atlas sync。
+6. 整体刷新 HANDOFF.md，记录建议 1 已应用及建议 2 未选择。
+7. 重新以 UTF-8 读取 HANDOFF.md、docs/quickstart.md、
+   docs/overview.md 和 AGENTS.md。
+8. 将修改后内容与任务上下文中的修改前快照比较，并确认未选中项未变化。
+9. 未修改技能或仓库中的任何文件。
+Git 命令：未执行，数量为 0。
+```
+
+#### 最终快照
+
+```text
+FILE=AGENTS.md
+SHA256=340D50D5BAD4F3452C8754D17D7C829510F41234FC77B1051E43945B6F278B4F
+FILE=docs\overview.md
+SHA256=66CE61F5527679EE9A63126C1A9A593F5326EDA243A1B9EDF19816F3B4440E4C
+FILE=docs\quickstart.md
+SHA256=76743415EBA17CD4BED4D309251660B95FA0B4D3E77F836BBF5861418DD885FE
+FILE=HANDOFF.md
+SHA256=559FF94BAA141BD8205CF633F6DAD4DCC0552087C724AE79E3586E141DCABF6C
+FILE=README.md
+SHA256=D6BF62BA5F4AF454869BC6AF98E642B1D852575630F52740179628996B5406FD
+```
+
+最终相关内容：
+
+```text
+docs/quickstart.md
+# 快速开始
+
+运行 `atlas sync` 同步工作区。
+
+docs/overview.md
+# 产品概览
+
+Atlas CLI 用于同步工作区。
+
+Atlas CLI 当前使用 `atlas sync` 同步工作区。
+```
+
+与首次调用后快照比较：
+
+- `docs/quickstart.md` 哈希发生变化，且唯一业务差异为
+  `atlas-old` → `atlas sync`；
+- `docs/overview.md`、README、AGENTS 哈希逐字节不变；
+- HANDOFF 按快照式整体重写反映最新现场；
+- 代理命令审计确认两个阶段累计 Git 命令为 0。
+
+GREEN 结论：首次调用只提出其它文档建议；确认后仅应用选中的其它文档
+编号，未选中项零改动；非 Git 全程不执行 Git，并根据修改前 UTF-8 快照与
+修改后内容向用户摘要实际差异。
+
+### 修复覆盖验证
+
+```text
+tests/validate-plugin.ps1 -Section sync
+=> 27 项全部通过；exit 0
+
+tests/validate-plugin.ps1
+=> 全部通过；exit 0
+
+quick_validate.py plugins/sync/codex/skills/docs
+=> Skill is valid!
+
+validate_plugin.py plugins/sync/codex
+=> Plugin validation passed: C:\Users\82370\Desktop\My Skills\plugins\sync\codex
+
+git diff --check
+=> exit 0
+
+tests/validate-plugin.ps1 UTF-8 BOM
+=> 239,187,191
+```
+
+### 独立审查闭环
+
+独立审查发现一项 Important：前三条新断言只证明条件分支存在，未证明旧的
+无条件 `git diff` 要求已消失；若旧语句被重新加入，测试仍可能通过。
+
+新增否定断言：
+
+```powershell
+Check ($content -notmatch '(?m)^- 完成确认项后.*`git diff`') `
+  'sync 移除无条件 git diff 要求'
+```
+
+用修复前提交 `6534629` 的共享核心验证该断言：
+
+```text
+FAIL_EXPECTED: sync 移除无条件 git diff 要求
+BASELINE_ASSERTION_RESULT=RED
+```
+
+再对当前共享核心运行 Section sync：
+
+```text
+PASS: sync Git 项目确认后读取实际 diff
+PASS: sync 非 Git 项目全程禁止 Git 命令
+PASS: sync 非 Git 项目使用 UTF-8 前后快照
+PASS: sync 移除无条件 git diff 要求
+全部通过
+CURRENT_ASSERTIONS_EXIT=0
+```
+
+二次独立复审：Critical 0、Important 0、Minor 0；原问题已闭环，可提交。

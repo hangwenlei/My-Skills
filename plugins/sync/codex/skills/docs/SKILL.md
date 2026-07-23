@@ -136,20 +136,26 @@ description: Use when 用户在 Codex 中显式调用 $sync:docs，或从 /skill
 - 继续执行使用 `/sync:docs 应用 1,3`（Claude）或
   `$sync:docs 应用 1,3`（Codex）。
 - 只执行用户确认的编号项；拒绝或未选中的建议保持零改动。
-- 完成确认项后运行并读取相关 `git diff`，向用户摘要实际差异。
+- 非 Git 项目在修改前完整读取并在当前任务上下文保存将修改文件的
+  **修改前 UTF-8 快照**；不要把快照写入项目目录。
+- Git 项目在应用确认项后运行并读取相关 `git diff`，向用户摘要实际差异。
+- 非 Git 项目禁止执行 Git 命令；应用确认项后重新读取相关文件的 UTF-8
+  内容，与修改前快照比较并向用户摘要实际差异。
 - 不执行 git commit。
 
 ## 步骤 5：向用户汇报
 
 用简体中文列出实际创建或更新的 `HANDOFF.md`、当前宿主的续接载体，以及
-用户已确认刷新的文档；摘要读取到的实际 `git diff`，提示用户复核并自行
-决定是否提交。Claude Code 说明新会话由 `CLAUDE.md` 的 `@HANDOFF.md`
-续接；Codex 说明新任务按 `AGENTS.md` 区块先读取 `HANDOFF.md`。
-不执行 git commit，不做与上述流程无关的操作。
+用户已确认刷新的文档。Git 项目摘要读取到的实际 `git diff`；非 Git 项目
+摘要 UTF-8 修改前快照与修改后内容的比较结果，并明确全程未执行 Git 命令。
+提示用户复核并自行决定是否提交。Claude Code 说明新会话由 `CLAUDE.md`
+的 `@HANDOFF.md` 续接；Codex 说明新任务按 `AGENTS.md` 区块先读取
+`HANDOFF.md`。不执行 git commit，不做与上述流程无关的操作。
 
 ## 常见错误
 
 - 不把旧 HANDOFF 当作比实时 Git 更可信的事实。
 - 不在 Codex 的 AGENTS 中写裸 `@HANDOFF.md`。
 - 不扫描全项目做两两文档比较。
+- 不在非 Git 项目中运行 `git diff` 或任何其它 Git 命令。
 - 不修改未确认项，不自动 commit。

@@ -182,6 +182,14 @@ if (Should-Run 'sync') {
     Check ($content -match '可合并') 'sync 保留可合并'
     Check ($content -match '日志型') 'sync 保留日志型跳过'
     Check ($content -match '同一事实只写一条') 'sync 保留 HANDOFF 去重'
+    Check ($content -match '(?m)^- Git 项目在应用确认项后.*`git diff`') `
+      'sync Git 项目确认后读取实际 diff'
+    Check ($content -match '(?m)^- 非 Git 项目禁止执行 Git 命令；') `
+      'sync 非 Git 项目全程禁止 Git 命令'
+    Check ($content -match '\*\*修改前 UTF-8 快照\*\*') `
+      'sync 非 Git 项目使用 UTF-8 前后快照'
+    Check ($content -notmatch '(?m)^- 完成确认项后.*`git diff`') `
+      'sync 移除无条件 git diff 要求'
   }
 
   if (Test-Path -LiteralPath $openaiPath) {
