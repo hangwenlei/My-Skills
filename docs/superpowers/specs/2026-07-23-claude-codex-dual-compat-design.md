@@ -1,7 +1,7 @@
 # Claude Code / Codex 双平台兼容设计
 
 - 日期：2026-07-23
-- 状态：已确认；根据可验证性审查修订为平台薄入口方案，实施计划待执行
+- 状态：实施完成；发布、本机升级与 runtime smoke 待执行
 - 仓库：https://github.com/hangwenlei/My-Skills
 - 范围：`chinese` 与 `sync` 两个插件、双平台 marketplace、验证、发布及本机 Codex 升级
 

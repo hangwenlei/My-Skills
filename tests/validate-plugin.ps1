@@ -24,6 +24,28 @@ function Should-Run($name) {
   return $Section -eq 'all' -or $Section -eq $name
 }
 
+function Remove-Whitespace($text) {
+  return ($text -replace '\s+', '')
+}
+
+function Test-YamlPolicyFalse($text, $key) {
+  $inPolicy = $false
+  foreach ($line in @($text -split '\r?\n')) {
+    if ($line -eq 'policy:') {
+      $inPolicy = $true
+      continue
+    }
+    if ($inPolicy -and $line -match '^\S') {
+      return $false
+    }
+    if ($inPolicy -and
+        $line -match "^\s+$([regex]::Escape($key)):\s*false\s*$") {
+      return $true
+    }
+  }
+  return $false
+}
+
 if (Should-Run 'distribution') {
   $claudeMarketplace = Join-Path $root '.claude-plugin\marketplace.json'
   $codexMarketplace = Join-Path $root '.agents\plugins\marketplace.json'
@@ -34,10 +56,19 @@ if (Should-Run 'distribution') {
     $claudeCatalog = Read-JsonUtf8 $claudeMarketplace
     Check ($claudeCatalog.name -eq 'my-skills') 'Claude marketplace name = my-skills'
     Check ($null -ne $claudeCatalog.owner) 'Claude marketplace 有 owner'
+    $claudeNames = @($claudeCatalog.plugins.name)
+    Check ($claudeNames.Count -eq 2 -and
+           @($claudeNames | Where-Object {
+             $_ -notin @('chinese', 'sync')
+           }).Count -eq 0) `
+      'Claude marketplace 仅登记唯一 chinese 与 sync'
     foreach ($expected in @('chinese', 'sync')) {
-      $entry = $claudeCatalog.plugins | Where-Object { $_.name -eq $expected }
-      Check ($null -ne $entry) "Claude marketplace 登记 $expected"
-      if ($null -ne $entry) {
+      $entries = @(
+        $claudeCatalog.plugins | Where-Object { $_.name -eq $expected }
+      )
+      Check ($entries.Count -eq 1) "Claude marketplace 唯一登记 $expected"
+      if ($entries.Count -eq 1) {
+        $entry = $entries[0]
         Check ($entry.source -eq "./plugins/$expected") "$expected Claude source 路径正确"
         $sourcePath = Join-Path $root ($entry.source -replace '/', '\\')
         Check (Test-Path -LiteralPath $sourcePath) "$expected Claude source 目录存在"
@@ -49,10 +80,19 @@ if (Should-Run 'distribution') {
     $codexCatalog = Read-JsonUtf8 $codexMarketplace
     Check ($codexCatalog.name -eq 'my-skills') 'Codex marketplace name = my-skills'
     Check ($codexCatalog.interface.displayName -eq 'My Skills') 'Codex marketplace 有显示名称'
+    $codexNames = @($codexCatalog.plugins.name)
+    Check ($codexNames.Count -eq 2 -and
+           @($codexNames | Where-Object {
+             $_ -notin @('chinese', 'sync')
+           }).Count -eq 0) `
+      'Codex marketplace 仅登记唯一 chinese 与 sync'
     foreach ($expected in @('chinese', 'sync')) {
-      $entry = $codexCatalog.plugins | Where-Object { $_.name -eq $expected }
-      Check ($null -ne $entry) "Codex marketplace 登记 $expected"
-      if ($null -ne $entry) {
+      $entries = @(
+        $codexCatalog.plugins | Where-Object { $_.name -eq $expected }
+      )
+      Check ($entries.Count -eq 1) "Codex marketplace 唯一登记 $expected"
+      if ($entries.Count -eq 1) {
+        $entry = $entries[0]
         Check ($entry.source.source -eq 'local') "$expected Codex source 类型正确"
         Check ($entry.source.path -eq "./plugins/$expected/codex") "$expected Codex source 路径正确"
         Check ($entry.policy.installation -eq 'AVAILABLE') "$expected installation policy 正确"
@@ -119,10 +159,15 @@ if (Should-Run 'chinese') {
     Check ($claudeContent -match
       '\$\{CLAUDE_PLUGIN_ROOT\}/codex/skills/init/SKILL\.md') `
       'chinese Claude 薄入口引用唯一共享核心'
+    Check (([regex]::Matches(
+      $claudeContent,
+      '\$\{CLAUDE_PLUGIN_ROOT\}/codex/skills/init/SKILL\.md'
+    )).Count -eq 1) 'chinese Claude 薄入口只引用共享核心一次'
   }
 
   if (Test-Path -LiteralPath $codexSkillPath) {
     $content = Get-Content -LiteralPath $codexSkillPath -Raw -Encoding UTF8
+    $normalized = Remove-Whitespace $content
     Check ($content -notmatch '(?m)^disable-model-invocation:') `
       'chinese Codex 核心无 Claude-only disable-model-invocation'
     Check ($content -notmatch '(?m)^allowed-tools:') `
@@ -132,13 +177,17 @@ if (Should-Run 'chinese') {
     Check ($content -match 'git rev-parse --show-toplevel') 'chinese 会定位 Git 项目根'
     Check ($content -match 'AGENTS\.md') 'chinese 包含 Codex AGENTS 分支'
     Check ($content -match '单边哨兵') 'chinese 会保护损坏哨兵'
+    Check ($normalized.Contains(
+      '只有在开始哨兵和结束哨兵各恰好出现一次，且开始哨兵位于结束哨兵之前时，才替换完整区块。')) `
+      'chinese 仅替换唯一且有序的哨兵区块'
     Check ($content -match '平台速查') 'chinese 含平台速查'
     Check ($content -match '常见错误') 'chinese 含常见错误'
   }
 
   if (Test-Path -LiteralPath $openaiPath) {
     $openai = Get-Content -LiteralPath $openaiPath -Raw -Encoding UTF8
-    Check ($openai -match 'allow_implicit_invocation:\s*false') 'chinese 禁止 Codex 隐式调用'
+    Check (Test-YamlPolicyFalse $openai 'allow_implicit_invocation') `
+      'chinese policy 结构禁止 Codex 隐式调用'
     Check ($openai -match '\$chinese:init') 'chinese 默认提示包含显式入口'
   }
 }
@@ -162,10 +211,15 @@ if (Should-Run 'sync') {
     Check ($claudeContent -match
       '\$\{CLAUDE_PLUGIN_ROOT\}/codex/skills/docs/SKILL\.md') `
       'sync Claude 薄入口引用唯一共享核心'
+    Check (([regex]::Matches(
+      $claudeContent,
+      '\$\{CLAUDE_PLUGIN_ROOT\}/codex/skills/docs/SKILL\.md'
+    )).Count -eq 1) 'sync Claude 薄入口只引用共享核心一次'
   }
 
   if (Test-Path -LiteralPath $codexSkillPath) {
     $content = Get-Content -LiteralPath $codexSkillPath -Raw -Encoding UTF8
+    $normalized = Remove-Whitespace $content
     Check ($content -notmatch '(?m)^disable-model-invocation:') `
       'sync Codex 核心无 Claude-only disable-model-invocation'
     Check ($content -notmatch '(?m)^allowed-tools:') `
@@ -175,6 +229,9 @@ if (Should-Run 'sync') {
     Check ($content -match 'git rev-parse --show-toplevel') 'sync 会定位 Git 项目根'
     Check ($content -match '实时 Git、测试和文件状态') 'sync 定义证据优先级'
     Check ($content -match 'sync:docs start') 'sync 定义 AGENTS 哨兵'
+    Check ($normalized.Contains(
+      '只有在开始哨兵和结束哨兵各恰好出现一次，且开始哨兵位于结束哨兵之前时，才替换完整区块。')) `
+      'sync 仅替换唯一且有序的哨兵区块'
     Check ($content -match '\$sync:docs 应用 1,3') 'sync 定义 Codex 二阶段入口'
     Check ($content -match '平台速查') 'sync 含平台速查'
     Check ($content -match '常见错误') 'sync 含常见错误'
@@ -182,6 +239,12 @@ if (Should-Run 'sync') {
     Check ($content -match '可合并') 'sync 保留可合并'
     Check ($content -match '日志型') 'sync 保留日志型跳过'
     Check ($content -match '同一事实只写一条') 'sync 保留 HANDOFF 去重'
+    Check ($normalized.Contains(
+      '不得把token、密码、私钥、连接串、带凭据URL、订阅链接、cookie或session等敏感值写入HANDOFF.md、其它文档或用户可见摘要。')) `
+      'sync 禁止持久化或复述敏感值'
+    Check ($normalized.Contains(
+      '只记录存在敏感配置、所在文件和需要人工处理，不记录或复述具体值；无法判断时按敏感信息处理并脱敏。')) `
+      'sync 对敏感信息只记录位置并默认脱敏'
     Check ($content -match '(?m)^- Git 项目在应用确认项后.*`git diff`') `
       'sync Git 项目确认后读取实际 diff'
     Check ($content -match '(?m)^- 非 Git 项目禁止执行 Git 命令；') `
@@ -194,7 +257,8 @@ if (Should-Run 'sync') {
 
   if (Test-Path -LiteralPath $openaiPath) {
     $openai = Get-Content -LiteralPath $openaiPath -Raw -Encoding UTF8
-    Check ($openai -match 'allow_implicit_invocation:\s*false') 'sync 禁止 Codex 隐式调用'
+    Check (Test-YamlPolicyFalse $openai 'allow_implicit_invocation') `
+      'sync policy 结构禁止 Codex 隐式调用'
     Check ($openai -match '\$sync:docs') 'sync 默认提示包含显式入口'
   }
 }
@@ -204,10 +268,13 @@ if (Should-Run 'docs') {
   $claudePath = Join-Path $root 'CLAUDE.md'
   $settingsPath = Join-Path $root '.claude\settings.json'
   $readmePath = Join-Path $root 'README.md'
+  $designPath = Join-Path $root `
+    'docs\superpowers\specs\2026-07-23-claude-codex-dual-compat-design.md'
   Check (Test-Path -LiteralPath $agentsPath) 'AGENTS.md 存在'
   Check (Test-Path -LiteralPath $claudePath) 'CLAUDE.md 存在'
   Check (Test-Path -LiteralPath $settingsPath) '.claude/settings.json 存在'
   Check (Test-Path -LiteralPath $readmePath) 'README.md 存在'
+  Check (Test-Path -LiteralPath $designPath) '双平台设计文档存在'
 
   if (Test-Path -LiteralPath $agentsPath) {
     $agents = Get-Content -LiteralPath $agentsPath -Raw -Encoding UTF8
@@ -224,6 +291,8 @@ if (Should-Run 'docs') {
     Check ($claude -match 'chinese:init start') 'CLAUDE 含中文规范哨兵'
     Check ($claude -match '始终使用简体中文回复') 'CLAUDE 含中文输出正文'
     Check ($claude -match '(?m)^@HANDOFF\.md\s*$') 'CLAUDE 挂载 HANDOFF'
+    Check ($claude.TrimEnd().EndsWith('@HANDOFF.md')) `
+      'CLAUDE 在文件末尾挂载 HANDOFF'
   }
 
   if (Test-Path -LiteralPath $settingsPath) {
@@ -243,8 +312,16 @@ if (Should-Run 'docs') {
     Check ($readme -match 'Directory') 'README 保留 Claude Directory FAQ'
     Check ($readme -match 'Codex 不支持第三方同名 slash') `
       'README 不虚构 Codex 第三方 slash alias'
+    Check ($readme -match '升级后需新开 Codex 任务') `
+      'README 明确 Codex 升级后新开任务'
     Check ($readme -match '快照式重写') 'README 保留 sync 核心功能说明'
     Check ($readme -match 'language.*chinese') 'README 保留 chinese 核心功能说明'
+    Check ($readme -match '不自动 commit') 'README 明确 skill 不自动 commit'
+  }
+
+  if (Test-Path -LiteralPath $designPath) {
+    $design = Get-Content -LiteralPath $designPath -Raw -Encoding UTF8
+    Check ($design -notmatch '实施计划待执行') '设计状态不再声称实施计划待执行'
   }
 }
 
