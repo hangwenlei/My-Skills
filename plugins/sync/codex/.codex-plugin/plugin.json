@@ -11,7 +11,7 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Sync Docs",
-    "shortDescription": "固化开发现场并安全刷新相关文档。",
+    "shortDescription": "固化开发现场并安全刷新相关文档",
     "longDescription": "生成 HANDOFF.md、配置 Codex 新任务读取交接，并通过确认式流程刷新和收敛相关文档。",
     "developerName": "hangwenlei",
     "category": "Productivity",
