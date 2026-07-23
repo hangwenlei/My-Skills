@@ -1,51 +1,79 @@
 # 开发现场交接（HANDOFF）
 
-> 更新时间：2026-06-10
+> 更新时间：2026-07-23
 
 ## 概览
-`My-Skills` 是 hangwenlei 的个人 Claude Code 技能商店（marketplace），已发布到 `https://github.com/hangwenlei/My-Skills`。含两个插件：`chinese`（`/chinese:init`）与 `sync`（`/sync:docs`），均已发布启用。本轮给 `sync` 增强了**跨文档去重**能力并发布到 **1.1.0**。工作树干净、与 `origin/main` 同步。
 
-## ✅ 已完成
-- `chinese` 插件：`/chinese:init` 把项目切中文模式（写 `.claude/settings.json` 的 `language` + `CLAUDE.md` 哨兵区块）。
-- `sync` 插件基础能力：`/sync:docs` 生成 `HANDOFF.md` + 在 `CLAUDE.md` 挂 `@HANDOFF.md` 自动加载 + propose-confirm 刷新其它文档。
-- **本轮 sync 去重增强（已发布 1.1.0）**：
-  - 步骤 4 跨文档去重——4.0 日志/时间线型一律跳过；4.1 只比对本次改动牵连的文档（不全项目扫描）；4.2 标 `过时`/`可收敛`/`可合并`；4.4 三护栏（不丢信息 / 受众边界 / 权威出处）；仍 propose-confirm。
-  - 步骤 2 HANDOFF 自身「同一事实只写一条」。
-  - `tests/validate-plugin.ps1` 加 4 条防回退断言（共 26 项全过）；`README.md` 同步描述；`plugin.json` bump 1.0.0→1.1.0。
-- 设计与计划：`docs/superpowers/specs/2026-06-10-sync-dedup-design.md`、`docs/superpowers/plans/2026-06-10-sync-dedup.md`。
-- 已 `git push` 到 `origin/main`；客户端已 `claude plugin update sync@my-skills` 升级到 1.1.0 生效。
+`My-Skills` 是同时面向 Claude Code 与 Codex 发布的个人技能市场，仓库地址为
+`https://github.com/hangwenlei/My-Skills`。双平台入口、共享 skill 核心和仓库级双宿主指令均已实现，静态验证已完成；当前仍处于发布前状态。
 
-## 🔄 进行中
-- 无未提交开发；本次 `/sync:docs` 生成的 `HANDOFF.md` 改动待复核提交。
+目标版本：
 
-## ⏭️ 下一步
-- 去重功能手动验收（计划 Task 4 的 6 场景：超集合并 / 重复收敛 / 日志型跳过 / 受众边界 / 不确认不改 / HANDOFF 自身去重）尚未正式跑。
-- 如需扩展：按相同结构在 `plugins/<新名>/` 加插件，并在 `marketplace.json` 登记、扩展校验脚本。
+- `chinese`：`1.1.0`
+- `sync`：`1.2.0`
 
-## 🧠 关键决策与理由
-- 去重取向：跨文档收敛为主、聚焦本次改动不做全项目扫描、标记+确认不自动改、日志型不碰、护栏保证不丢信息——即主流 DRY/SSOT 但不做「大手术」。否决「超集自动合并」「全项目 SSOT 重构」。
-- `README` 只做概览、不复述 `SKILL` 的全部护栏，完整规则留在 `SKILL` 单一权威出处（SSOT）。
-- 本项目直接在 `main` 提交并 push 发布（个人项目惯例）。
-- 插件命令强制带命名空间（`/chinese:init`、`/sync:docs`）；续接靠 `HANDOFF.md` + `CLAUDE.md` 的 `@HANDOFF.md`；不自动 commit。
+## 已完成
 
-## 📁 重要文件
-- `.claude-plugin/marketplace.json`：商店清单（登记 chinese、sync）。
-- `plugins/chinese/skills/init/SKILL.md`：chinese 逻辑。
-- `plugins/sync/skills/docs/SKILL.md`：sync 逻辑（含去重步骤 4 / 步骤 2）。
-- `plugins/sync/.claude-plugin/plugin.json`：sync 插件清单（现 `1.1.0`）。
-- `tests/validate-plugin.ps1`：结构校验脚本（26 项）。
-- `docs/superpowers/specs/`、`docs/superpowers/plans/`：设计与实现计划（含 2026-06-10 去重）。
+- 建立 Claude 与 Codex 两套 marketplace 入口，两个平台共用同一个 Git 仓库。
+- 为 `chinese` 和 `sync` 建立双平台 manifest 与共享 skill 核心，并保持 Claude 薄入口。
+- `chinese` 已区分宿主行为：Claude 维护 `.claude/settings.json` 与 `CLAUDE.md`，Codex 只维护 `AGENTS.md`。
+- `sync` 已区分宿主行为：Claude 在 `CLAUDE.md` 挂载 `@HANDOFF.md`，Codex 在 `AGENTS.md` 维护显式续接区块。
+- 仓库根的 `.claude/settings.json`、`CLAUDE.md` 与 `AGENTS.md` 已恢复或收敛为双宿主指令。
+- README 已覆盖 Claude Code 与 Codex 的安装、调用、升级、宿主差异和常见问题。
+- 静态校验覆盖 distribution、chinese、sync 与 docs，各入口、版本、关键行为与用户文档均有断言。
 
-## ⚠️ 注意事项 / 坑
-- `.ps1` 必须存为 **UTF-8 with BOM**；读取含中文的 JSON/MD 须带 `-Encoding UTF8`。
-- 不要让 agent 直接写 `~/.claude/`（沙箱 + 自我修改护栏）；插件安装/升级由用户在 CLI 完成。
-- **插件发新版后客户端升级**：先 bump `plugin.json` 的 `version`（同版本号会被判「已最新」跳过），再 `claude plugin marketplace update my-skills`（只刷新清单），**然后 `claude plugin update <plugin>@my-skills`**（才升级已装插件、在 `cache/.../  <版本号>/` 新建目录），最后 `/reload-plugins` 或重启。只跑 `marketplace update` 不会升级已装插件。
-- `git push` 别加 `2>&1`（PS 5.1 会把 git 的 stderr 进度当 `NativeCommandError` 包装，误报失败）。
-- 嵌套 `powershell -Command "..."` 会让外层先展开 `$` 变量——直接跑命令即可。
+## 进行中
 
-## ▶️ 常用命令
-- `powershell -ExecutionPolicy Bypass -File tests\validate-plugin.ps1`：跑结构校验。
-- `claude plugin marketplace update my-skills`：刷新商店清单。
-- `claude plugin update <plugin>@my-skills`：升级已安装插件到新版。
-- `claude plugin install <plugin>@my-skills`：首次安装插件。
-- `git push origin main`：发布。
+- 等待将当前提交 push 到远端。
+- 等待在本机 Codex 中升级 marketplace 与两个插件，然后新开任务验证加载。
+
+## 下一步
+
+1. 复核提交内容并执行 `git push`。
+2. 在本机执行：
+
+   ```text
+   codex plugin marketplace upgrade my-skills
+   codex plugin add chinese@my-skills
+   codex plugin add sync@my-skills
+   ```
+
+3. 新开 Codex 任务，分别调用 `$chinese:init` 与 `$sync:docs` 做 runtime smoke。
+4. 如需验证 Claude Code 发布包，更新 marketplace 与插件后运行 `/reload-plugins` 或重启客户端。
+
+## 当前验证
+
+已完成的静态验证命令：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\validate-plugin.ps1 -Section docs
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\validate-plugin.ps1 -Section all
+```
+
+预期均为 exit `0` 并输出“全部通过”。
+
+## 风险与注意事项
+
+- 当前验证以静态结构和关键文本断言为主；本机 Codex 升级与 runtime smoke 尚未执行，不能据此断言实际安装链路已经通过。
+- 当前提交尚未 push，远端用户仍无法获得本轮双平台更新。
+- `tests/validate-plugin.ps1` 必须保持 UTF-8 with BOM，以兼容 Windows PowerShell 5.1 的中文解析。
+- Codex 升级后必须新开任务；现有任务不会自动加载新插件版本。
+- `sync` 的跨文档更新仍是 propose-confirm，不自动提交，也不应改写日志型或时间线型文档。
+
+## 重要文件
+
+- `.claude-plugin/marketplace.json`：Claude marketplace。
+- `.agents/plugins/marketplace.json`：Codex marketplace。
+- `plugins/chinese/`：chinese 的 Claude 薄入口、Codex manifest 与共享核心。
+- `plugins/sync/`：sync 的 Claude 薄入口、Codex manifest 与共享核心。
+- `.claude/settings.json`、`CLAUDE.md`、`AGENTS.md`：本仓库双宿主指令。
+- `tests/validate-plugin.ps1`：全量静态验证脚本。
+
+## 常用命令
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\validate-plugin.ps1 -Section docs
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\validate-plugin.ps1 -Section all
+git status --short
+git diff --check
+```

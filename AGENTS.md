@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-本文件为 Claude Code 在此项目工作时的指引。
+本文件为 Codex 在此项目工作时的指引。
 
 ## 项目说明
 
@@ -18,4 +18,9 @@ https://github.com/hangwenlei/My-Skills 。当前包含：
 - Git 提交信息使用中文。
 <!-- chinese:init end -->
 
-@HANDOFF.md
+<!-- sync:docs start -->
+## 开发现场续接
+
+开始任务时，先读取项目根目录的 `HANDOFF.md`。把旧交接作为线索；
+若与实时 Git、测试或文件状态冲突，以实时证据为准并更新交接。
+<!-- sync:docs end -->

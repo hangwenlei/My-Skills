@@ -200,8 +200,52 @@ if (Should-Run 'sync') {
 }
 
 if (Should-Run 'docs') {
-  $readme = Join-Path $root 'README.md'
-  Check (Test-Path -LiteralPath $readme) 'README.md 存在'
+  $agentsPath = Join-Path $root 'AGENTS.md'
+  $claudePath = Join-Path $root 'CLAUDE.md'
+  $settingsPath = Join-Path $root '.claude\settings.json'
+  $readmePath = Join-Path $root 'README.md'
+  Check (Test-Path -LiteralPath $agentsPath) 'AGENTS.md 存在'
+  Check (Test-Path -LiteralPath $claudePath) 'CLAUDE.md 存在'
+  Check (Test-Path -LiteralPath $settingsPath) '.claude/settings.json 存在'
+  Check (Test-Path -LiteralPath $readmePath) 'README.md 存在'
+
+  if (Test-Path -LiteralPath $agentsPath) {
+    $agents = Get-Content -LiteralPath $agentsPath -Raw -Encoding UTF8
+    Check ($agents -match 'chinese:init start') 'AGENTS 含中文规范哨兵'
+    Check ($agents -match 'sync:docs start') 'AGENTS 含续接哨兵'
+    Check ($agents -match '先读取项目根目录的 `HANDOFF\.md`') `
+      'AGENTS 明确要求读取 HANDOFF'
+    Check ($agents -match '以实时证据为准') 'AGENTS 定义实时证据优先级'
+    Check ($agents -notmatch '(?m)^@HANDOFF\.md\s*$') 'AGENTS 不使用裸 @HANDOFF 导入'
+  }
+
+  if (Test-Path -LiteralPath $claudePath) {
+    $claude = Get-Content -LiteralPath $claudePath -Raw -Encoding UTF8
+    Check ($claude -match 'chinese:init start') 'CLAUDE 含中文规范哨兵'
+    Check ($claude -match '始终使用简体中文回复') 'CLAUDE 含中文输出正文'
+    Check ($claude -match '(?m)^@HANDOFF\.md\s*$') 'CLAUDE 挂载 HANDOFF'
+  }
+
+  if (Test-Path -LiteralPath $settingsPath) {
+    $settings = Read-JsonUtf8 $settingsPath
+    Check ($settings.language -eq 'chinese') '.claude/settings.json language = chinese'
+  }
+
+  if (Test-Path -LiteralPath $readmePath) {
+    $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding UTF8
+    Check ($readme -match 'codex plugin marketplace add hangwenlei/My-Skills') 'README 含 Codex 安装命令'
+    Check ($readme -match '\$chinese:init') 'README 含 Codex chinese 调用'
+    Check ($readme -match '\$sync:docs') 'README 含 Codex sync 调用'
+    Check ($readme -match 'codex plugin marketplace upgrade my-skills') 'README 含 Codex 升级命令'
+    Check ($readme -match 'claude plugin update') 'README 保留 Claude 升级命令'
+    Check ($readme -match '/reload-plugins') 'README 保留 Claude 热加载说明'
+    Check ($readme -match 'GUI 客户端') 'README 保留 Claude GUI 安装说明'
+    Check ($readme -match 'Directory') 'README 保留 Claude Directory FAQ'
+    Check ($readme -match 'Codex 不支持第三方同名 slash') `
+      'README 不虚构 Codex 第三方 slash alias'
+    Check ($readme -match '快照式重写') 'README 保留 sync 核心功能说明'
+    Check ($readme -match 'language.*chinese') 'README 保留 chinese 核心功能说明'
+  }
 }
 
 if ($script:fail -gt 0) {
