@@ -25,6 +25,43 @@ function ConvertTo-ComparablePath($path) {
   return ($path -replace '\\', '/').TrimEnd('/')
 }
 
+function Get-BranchFileName {
+  param([string]$BranchName)
+  # Windows 非法文件名字符统一替换为连字符
+  $slug = $BranchName -replace '[\\/:*?"<>|]', '-'
+  # 必须显式 UTF-8，否则含中文的分支名在不同宿主下哈希不一致
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($BranchName)
+  $sha1 = [System.Security.Cryptography.SHA1]::Create()
+  try {
+    $hashBytes = $sha1.ComputeHash($bytes)
+  } finally {
+    $sha1.Dispose()
+  }
+  $hash = -join ($hashBytes | ForEach-Object { $_.ToString('x2') })
+  return ('{0}-{1}.md' -f $slug, $hash.Substring(0, 6))
+}
+
+function Resolve-MainBranch {
+  param([string]$Repo)
+  # 1. 远端 HEAD 指向
+  $originHead = & git -C $Repo symbolic-ref --quiet refs/remotes/origin/HEAD
+  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($originHead)) {
+    return ($originHead -replace '^refs/remotes/origin/', '')
+  }
+  # 2. 远端候选分支
+  foreach ($candidate in @('main', 'master')) {
+    & git -C $Repo rev-parse --verify --quiet "refs/remotes/origin/$candidate" | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $candidate }
+  }
+  # 3. 本地候选分支
+  foreach ($candidate in @('main', 'master')) {
+    & git -C $Repo rev-parse --verify --quiet "refs/heads/$candidate" | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $candidate }
+  }
+  # 4. 不可得，调用方须跳过 merged 判据
+  return $null
+}
+
 function New-GcScenario {
   $root = Join-Path $env:TEMP ('sync-gc-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
   $repo = Join-Path $root 'repo'
@@ -152,6 +189,27 @@ if (Should-Run 'env') {
       'T8 分文件各写各的，两方内容均存活'
   } finally {
     Remove-GcScenario $scenario
+  }
+}
+
+if (Should-Run 'algo') {
+  Check ((Get-BranchFileName 'feat/auth') -eq 'feat-auth-3a9c55.md') `
+    'T7 feat/auth 生成带哈希后缀的文件名'
+  Check ((Get-BranchFileName 'feat-auth') -eq 'feat-auth-f42474.md') `
+    'T7 feat-auth 生成不同的哈希后缀'
+  Check ((Get-BranchFileName 'feat/auth') -ne (Get-BranchFileName 'feat-auth')) `
+    'T7 slug 碰撞被哈希后缀消除'
+  Check ((Get-BranchFileName '功能/登录') -eq '功能-登录-9ff12b.md') `
+    'T7 中文分支名按 UTF-8 字节哈希，跨工具一致'
+
+  $algoScenario = $null
+  try {
+    $algoScenario = New-GcScenario
+    $resolved = Resolve-MainBranch -Repo $algoScenario.Repo
+    Check ($resolved -eq 'main') `
+      'T5 主干探测忽略 init.defaultBranch，返回真实主干 main'
+  } finally {
+    Remove-GcScenario $algoScenario
   }
 }
 
