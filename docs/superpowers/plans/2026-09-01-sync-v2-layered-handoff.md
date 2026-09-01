@@ -973,6 +973,25 @@ git commit -m "feat(sync): 新增老项目迁移与续接区块升级"
 修改 `plugins/sync/skills/docs/SKILL.md` 第 1 条，把 `（可带 应用 1,3 参数）`
 改为 `（可带 预览 参数）`。其余结构不变，仍只声明宿主并读取共享核心。
 
+- [ ] **Step 6.5: 补三条反向断言，确保 1.x 旧指令确实被删除**
+
+Task 4 评审发现：现有断言只检查 2.0 的新条款「存在」，不检查 1.x 的旧条款「已删除」。
+若步骤 2 的旧模板残留，`SKILL.md` 会自相矛盾——新章节说稳定层不设全局时间戳，旧
+模板却仍要求写 `> 更新时间`——而测试全绿。在 `tests/validate-plugin.ps1` 的
+`$codexSkillPath` 区块内追加：
+
+```powershell
+    Check ($content -notmatch '(?m)^> 更新时间：<当前日期时间>') `
+      'sync 2.0 稳定层模板不再要求全局更新时间戳'
+    Check ($markup -notmatch '整体重写该文件，不追加') `
+      'sync 2.0 不再保留 1.x 的单文件快照式重写指令'
+    Check ($content -notmatch '应用 1,3') `
+      'sync 2.0 不再保留二阶段确认入口'
+```
+
+这三条在本任务替换完步骤 2、步骤 4 与平台速查表后应当自动为 PASS。若仍为 FAIL，
+说明旧指令有残留，必须清理干净。
+
 - [ ] **Step 7: 运行 sync section，确认全绿**
 
 Run:
