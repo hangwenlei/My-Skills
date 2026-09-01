@@ -413,7 +413,18 @@ if (Should-Run 'docs') {
     Check ($claude -match 'chinese:init start') 'CLAUDE 含中文规范哨兵'
     Check ($claude -match '始终使用简体中文回复') 'CLAUDE 含中文输出正文'
     Check ($claude -match '(?m)^@HANDOFF\.md\s*$') 'CLAUDE 挂载 HANDOFF'
-    Check ($claude.TrimEnd().EndsWith('@HANDOFF.md')) `
+    # 迁移前：裸 @HANDOFF.md 独占行本身就是文件最后一行
+    # 迁移后：sync:docs 哨兵区块是文件结尾，裸 @HANDOFF.md 独占行位于区块内
+    # 两种形态都算「在文件末尾挂载」，否则本仓库自迁移后这条断言必然失败
+    $claudeTail = $claude.TrimEnd()
+    $claudeBareTail = $claudeTail.EndsWith('@HANDOFF.md')
+    $claudeSentinel = [regex]::Match(
+      $claudeTail,
+      '(?s)<!-- sync:docs start -->(?<body>.*?)<!-- sync:docs end -->')
+    $claudeSentinelTail = $claudeTail.EndsWith('<!-- sync:docs end -->') -and
+      $claudeSentinel.Success -and
+      ($claudeSentinel.Groups['body'].Value -match '(?m)^@HANDOFF\.md[ \t]*\r?$')
+    Check ($claudeBareTail -or $claudeSentinelTail) `
       'CLAUDE 在文件末尾挂载 HANDOFF'
   }
 
