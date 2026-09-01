@@ -330,10 +330,30 @@ if (Should-Run 'sync') {
       'sync 2.0 定义主干探测第一优先级'
     Check ($markup.Contains('完整分支名的UTF-8字节')) `
       'sync 2.0 规定哈希输入为 UTF-8 字节'
-    Check ($content -match 'git branch --merged') `
+    Check ($content -match 'git branch -a --merged') `
       'sync 2.0 用 merged 判据识别已完成分支'
     Check ($markup -match "frontmatter记录的分支已不在gitbranch") `
       'sync 2.0 孤儿判据以分支是否存在为主判据'
+    # 远端删除分支后 origin/<name> 不 prune 就一直留在 git branch -a 里；
+    # 三级判据必须都能处理远端限定名，否则最常见的 GitHub 流程永远回收不掉
+    Check ($markup.Contains('gitfetch--prune')) `
+      'sync 2.0 说明远端追踪引用需 prune 才消失'
+    Check ($content -match 'git rev-parse --verify --quiet') `
+      'sync 2.0 用 rev-parse 判定分支修订是否可解析'
+    Check ($markup.Contains('该条时间判据视为未命中，本轮对该文件不做任何动作')) `
+      'sync 2.0 修订解析失败时时间判据不动作'
+    Check ($markup.Contains('|shasum|cut-c1-6')) `
+      'sync 2.0 为 macOS 提供 shasum 回退'
+    Check ($markup.Contains('禁止先写成.ps1文件再运行')) `
+      'sync 2.0 禁止把哈希片段落成无 BOM 脚本'
+    Check ($content -match 'git branch --show-current') `
+      'sync 2.0 给出获取当前分支名的命令'
+    Check ($markup.Contains('不要用gitrev-parse--abbrev-refHEAD')) `
+      'sync 2.0 禁止用 abbrev-ref 取分支名'
+    Check ($markup.Contains('游离HEAD的退化')) `
+      'sync 2.0 定义游离 HEAD 的退化'
+    Check ($markup.Contains('禁止用commitSHA顶替分支名去拼文件名')) `
+      'sync 2.0 禁止用 commit SHA 拼现场文件名'
     Check ($markup -match '(禁止|不得)使用文件mtime') `
       'sync 2.0 禁止用 mtime 做时间判据'
     Check ($content -match '\[待核实\]') `
