@@ -25,7 +25,7 @@
   ```
 
   三个必须避开的坑：① 不能用 `Get-Content -Raw` 读——不指定编码时它按系统代码页（936/GBK）解码无 BOM 的 UTF-8，中文全部变成乱码后又被当作正确内容写回；② 必须 `TrimStart([char]0xFEFF)`——`Encoding.UTF8.GetString()` 不剥离已有 BOM，直接重写会产生双 BOM（`EF BB BF EF BB BF`），PowerShell 会把混入正文的 U+FEFF+`param` 当成未知命令并报 `The term '﻿param' is not recognized`；③ 不能在 Git Bash 里用管道捕获 `powershell.exe` 输出来判断中文是否正确——管道会按控制台代码页转码，正常的中文也会显示成乱码，要验证渲染必须在 PowerShell 中直接运行。验证用 `head -c 3 <文件> | xxd`，必须是单个 `efbbbf`。
-- **文档可移植性**：`docs/` 下的计划与验证文档**不得包含**任何形如 `X:\Users\` 或 `X:/Users/` 的机器用户路径，也不得包含机器用户名数字片段。`tests/validate-plugin.ps1` 的 `docs` section 会强制检查。测试脚本一律使用 `$env:TEMP`。
+- **文档可移植性**：`docs/` 下的计划与验证文档**不得包含**机器上的绝对用户路径（盘符 + `Users` 目录 + 用户名的形式，正斜杠反斜杠皆算），也不得包含机器用户名的数字片段。`tests/validate-plugin.ps1` 的 `docs` section 会强制检查。**该检查会扫描本文档自身**，所以这里只能描述该模式而不能写出它的字面形式，否则规则说明本身就会把检查触发成误报。测试脚本一律使用 `$env:TEMP`。
 - **PowerShell 5.1 兼容**：禁止使用 `&&`、`||`、三元运算符、`??`、`?.`；禁止对原生 exe 使用 `2>&1`；多行字符串使用 here-string 且结束符 `'@` 顶格。
 - **主干探测**：禁止使用 `git config init.defaultBranch` 判定主干分支（实测其值为 `master` 而真实主干为 `main`）。
 - **文件名哈希**：一律对**完整分支名的 UTF-8 字节**做 SHA-1，取前 6 位十六进制小写，不得依赖平台默认编码。
