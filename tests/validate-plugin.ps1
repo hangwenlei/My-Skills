@@ -28,6 +28,11 @@ function Remove-Whitespace($text) {
   return ($text -replace '\s+', '')
 }
 
+function Remove-Markup($text) {
+  # 同时去掉空白、markdown 强调符与反引号；保留下划线，它出现在标识符里
+  return ($text -replace '[\s*`]', '')
+}
+
 function Test-YamlPolicyFalse($text, $key) {
   $inPolicy = $false
   $directIndent = $null
@@ -207,6 +212,17 @@ if (Should-Run 'chinese') {
 
 if (Should-Run 'sync') {
   $claudeSkillPath = Join-Path $root 'plugins\sync\skills\docs\SKILL.md'
+  $claudeManifestPath = Join-Path $root 'plugins\sync\.claude-plugin\plugin.json'
+  $codexManifestPath = Join-Path $root 'plugins\sync\codex\.codex-plugin\plugin.json'
+  if ((Test-Path -LiteralPath $claudeManifestPath) -and
+      (Test-Path -LiteralPath $codexManifestPath)) {
+    $claudeManifest = Read-JsonUtf8 $claudeManifestPath
+    $codexManifest = Read-JsonUtf8 $codexManifestPath
+    Check ($claudeManifest.version -eq '2.0.0') 'sync Claude 清单版本为 2.0.0'
+    Check ($codexManifest.version -eq '2.0.0') 'sync Codex 清单版本为 2.0.0'
+    Check ($claudeManifest.version -eq $codexManifest.version) `
+      'sync 双平台清单版本一致'
+  }
   $codexSkillPath = Join-Path $root 'plugins\sync\codex\skills\docs\SKILL.md'
   $openaiPath = Join-Path $root 'plugins\sync\codex\skills\docs\agents\openai.yaml'
   Check (Test-Path -LiteralPath $claudeSkillPath) 'sync Claude 薄入口存在'
@@ -247,7 +263,6 @@ if (Should-Run 'sync') {
     Check ($normalized.Contains(
       '只有在开始哨兵和结束哨兵各恰好出现一次，且开始哨兵位于结束哨兵之前时，才替换完整区块。')) `
       'sync 仅替换唯一且有序的哨兵区块'
-    Check ($content -match '\$sync:docs 应用 1,3') 'sync 定义 Codex 二阶段入口'
     Check ($content -match '平台速查') 'sync 含平台速查'
     Check ($content -match '常见错误') 'sync 含常见错误'
     Check ($content -match '可收敛') 'sync 保留可收敛'
@@ -296,15 +311,47 @@ if (Should-Run 'sync') {
     Check ($normalized.Contains(
       '只记录存在敏感配置、所在文件和需要人工处理，不记录或复述具体值；无法判断时按敏感信息处理并脱敏。')) `
       'sync 对敏感信息只记录位置并默认脱敏'
-    Check ($normalized.Contains(
-      'Git项目在应用确认项后先读取相关安全diff元数据；只有在敏感信息闸门内完成本地过滤后，才能读取脱敏正文。')) `
-      'sync Git 项目确认后也遵守证据读取闸门'
     Check ($content -match '(?m)^- 非 Git 项目禁止执行 Git 命令；') `
       'sync 非 Git 项目全程禁止 Git 命令'
     Check ($content -match '\*\*修改前 UTF-8 快照\*\*') `
       'sync 非 Git 项目使用 UTF-8 前后快照'
-    Check ($content -notmatch '(?m)^- 完成确认项后.*`git diff`') `
-      'sync 移除无条件 git diff 要求'
+
+    $markup = Remove-Markup $content
+
+    Check ($content -match 'sync:docs schema=2') `
+      'sync 2.0 定义稳定层 schema 标记'
+    Check ($content -match '\.handoff/') `
+      'sync 2.0 定义分支现场目录'
+    Check ($content -match 'git rev-parse --path-format=absolute --git-common-dir') `
+      'sync 2.0 用 common dir 定位协同看板'
+    Check ($markup.Contains('禁止使用gitconfiginit.defaultBranch')) `
+      'sync 2.0 明令禁止用 init.defaultBranch 探测主干'
+    Check ($content -match 'git symbolic-ref --quiet refs/remotes/origin/HEAD') `
+      'sync 2.0 定义主干探测第一优先级'
+    Check ($markup.Contains('完整分支名的UTF-8字节')) `
+      'sync 2.0 规定哈希输入为 UTF-8 字节'
+    Check ($content -match 'git branch --merged') `
+      'sync 2.0 用 merged 判据识别已完成分支'
+    Check ($markup.Contains('禁止使用文件mtime')) `
+      'sync 2.0 禁止用 mtime 做时间判据'
+    Check ($content -match '\[待核实\]') `
+      'sync 2.0 定义 L3 语义过期的就地标注'
+    Check ($markup.Contains('只产出淘汰决议')) `
+      'sync 2.0 规定 GC 不直接落盘'
+    Check ($markup.Contains('稳定层不设全局更新时间戳')) `
+      'sync 2.0 移除必然冲突的全局时间戳'
+    Check ($markup.Contains('非主干分支不修改HANDOFF.md')) `
+      'sync 2.0 把迁移锚点锁定在主干'
+    Check ($content -match '/sync:docs 预览') `
+      'sync 2.0 提供预览开关'
+    Check ($markup.Contains('Git项目直接应用，不再要求确认编号')) `
+      'sync 2.0 取消 Git 项目的两阶段确认'
+    Check ($markup.Contains('非Git项目保留二次确认')) `
+      'sync 2.0 对非 Git 项目保留确认'
+    Check ($markup.Contains('绝不记录配置项的值')) `
+      'sync 2.0 配置项清单只记存在性'
+    Check ($content -match 'mkdir -p') `
+      'sync 2.0 要求写入前创建目录（空目录不进 Git）'
   }
 
   if (Test-Path -LiteralPath $openaiPath) {
@@ -381,7 +428,9 @@ if (Should-Run 'docs') {
       'README 不虚构 Codex 第三方 slash alias'
     Check ($readme -match '升级后需新开 Codex 任务') `
       'README 明确 Codex 升级后新开任务'
-    Check ($readme -match '快照式重写') 'README 保留 sync 核心功能说明'
+    Check ($readme -match '\.handoff/') 'README 说明分支现场目录'
+    Check ($readme -match '协同看板') 'README 说明协同看板'
+    Check ($readme -match '主干分支') 'README 说明老项目迁移需在主干执行'
     Check ($readme -match 'language.*chinese') 'README 保留 chinese 核心功能说明'
     Check ($readme -match '不自动 commit') 'README 明确 skill 不自动 commit'
   }
@@ -413,6 +462,8 @@ if (Should-Run 'docs') {
   foreach ($portableDocument in @(
     @{ Label = '实施计划'; Path = $planPath }
     @{ Label = '验证证据'; Path = $verificationPath }
+    @{ Label = 'sync 2.0 实施计划'; Path = (Join-Path $root `
+        'docs\superpowers\plans\2026-09-01-sync-v2-layered-handoff.md') }
   )) {
     if (Test-Path -LiteralPath $portableDocument.Path) {
       $portableContent = Get-Content -LiteralPath $portableDocument.Path `
