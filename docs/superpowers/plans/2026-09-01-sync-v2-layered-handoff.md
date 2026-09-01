@@ -1049,6 +1049,21 @@ git commit -m "feat(sync): 取消两阶段确认并新增冲突预警"
 - Consumes: Task 3 的版本断言与 README 断言
 - Produces: 可发布的 2.0.0 版本
 
+- [ ] **Step 0: 同步 distribution section 的硬编码版本表**
+
+`tests/validate-plugin.ps1` 的 `distribution` section 内有一张独立于 Task 3 新断言
+之外的硬编码版本表（约第 124-125 行）。升级版本号后它必然失败，而计划原本没有
+任何任务负责它。把 sync 那行改为 `2.0.0`，`chinese` 保持 `1.1.0`：
+
+```powershell
+  foreach ($plugin in @(
+    @{ Name = 'chinese'; Version = '1.1.0' },
+    @{ Name = 'sync'; Version = '2.0.0' }
+  )) {
+```
+
+改完按全局约束补回 UTF-8 BOM。
+
 - [ ] **Step 1: 升级两处版本号与描述**
 
 `plugins/sync/.claude-plugin/plugin.json`：
