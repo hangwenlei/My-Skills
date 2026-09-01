@@ -109,6 +109,46 @@ function Remove-GcScenario($scenario) {
   Remove-Item -LiteralPath $scenario.Root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+function New-RemoteScenario {
+  param(
+    [string]$InitialBranch,
+    [string[]]$OriginBranches = @(),
+    [string]$OriginHeadBranch = $null
+  )
+  # 独立于 New-GcScenario 的场景工厂：专门造带 origin 远端的仓库，
+  # 用来覆盖 Resolve-MainBranch 的第 1/2 级（origin/HEAD、origin/<candidate>）
+  # 以及第 4 级（无 remote 且本地无候选分支）。不改动 New-GcScenario，
+  # 避免影响 env section 已依赖它当前行为的 11 个断言。
+  $root = Join-Path $env:TEMP ('sync-remote-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+  $repo = Join-Path $root 'repo'
+  New-Item -ItemType Directory -Path $repo -Force | Out-Null
+  & git init -q $repo
+  # 不用 git init -b，兼容 2.28 以前的版本
+  & git -C $repo symbolic-ref HEAD "refs/heads/$InitialBranch"
+  & git -C $repo config user.email 'test@example.com'
+  & git -C $repo config user.name 'sync-test'
+  Set-Content -LiteralPath (Join-Path $repo 'seed.md') -Value '# seed' -Encoding utf8
+  & git -C $repo add -A
+  & git -C $repo commit -q -m 'init'
+
+  $origin = $null
+  if ($OriginBranches.Count -gt 0) {
+    $origin = Join-Path $root 'origin.git'
+    & git init -q --bare $origin
+    foreach ($b in $OriginBranches) {
+      & git -C $repo push -q $origin "HEAD:refs/heads/$b"
+    }
+    & git -C $repo remote add origin $origin
+    & git -C $repo fetch -q origin
+    if ($OriginHeadBranch) {
+      # 显式设置 origin/HEAD，模拟 clone 时从远端默认分支继承的本地副本
+      & git -C $repo symbolic-ref refs/remotes/origin/HEAD "refs/remotes/origin/$OriginHeadBranch"
+    }
+  }
+
+  return [pscustomobject]@{ Root = $root; Repo = $repo; Origin = $origin }
+}
+
 if (Should-Run 'env') {
   $scenario = $null
   try {
@@ -210,6 +250,43 @@ if (Should-Run 'algo') {
       'T5 主干探测忽略 init.defaultBranch，返回真实主干 main'
   } finally {
     Remove-GcScenario $algoScenario
+  }
+
+  # 上面的 T5 只覆盖了第 3 级（本地分支回退）。以下三条补齐第 1/2/4 级，
+  # 每条都要能区分“正确走了目标优先级”与“跳过它回退到下一级”。
+  $remoteHeadScenario = $null
+  try {
+    # 第 1 级：origin/HEAD 指向 trunk，同时本地也存在 main——
+    # 走第 1 级返回 trunk，误跳到第 3 级会返回 main，两者不同才有鉴别力。
+    $remoteHeadScenario = New-RemoteScenario -InitialBranch 'main' -OriginBranches @('trunk') -OriginHeadBranch 'trunk'
+    $resolvedHead = Resolve-MainBranch -Repo $remoteHeadScenario.Repo
+    Check ($resolvedHead -eq 'trunk') `
+      'T5 主干探测优先读取 origin/HEAD，即使本地存在同名 main 分支'
+  } finally {
+    Remove-GcScenario $remoteHeadScenario
+  }
+
+  $remoteMainScenario = $null
+  try {
+    # 第 2 级：没有 origin/HEAD，远端有 origin/main，本地只有 master——
+    # 走第 2 级返回 main，误跳到第 3 级会返回 master，两者不同才有鉴别力。
+    $remoteMainScenario = New-RemoteScenario -InitialBranch 'master' -OriginBranches @('main')
+    $resolvedMain = Resolve-MainBranch -Repo $remoteMainScenario.Repo
+    Check ($resolvedMain -eq 'main') `
+      'T5 无 origin/HEAD 时回退到远端候选分支 origin/main，不误判本地 master'
+  } finally {
+    Remove-GcScenario $remoteMainScenario
+  }
+
+  $noMainScenario = $null
+  try {
+    # 第 4 级：无 remote，本地既无 main 也无 master
+    $noMainScenario = New-RemoteScenario -InitialBranch 'dev'
+    $resolvedNone = Resolve-MainBranch -Repo $noMainScenario.Repo
+    Check ($null -eq $resolvedNone) `
+      'T5 无 remote 且本地无 main/master 候选时返回 $null'
+  } finally {
+    Remove-GcScenario $noMainScenario
   }
 }
 
