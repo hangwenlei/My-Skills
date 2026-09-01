@@ -1,7 +1,7 @@
 {
   "name": "sync",
-  "version": "1.2.0",
-  "description": "固化开发现场到 HANDOFF.md 并安全刷新相关文档",
+  "version": "2.0.0",
+  "description": "分层固化开发现场并安全刷新相关文档，支持多 worktree 并行",
   "author": {
     "name": "hangwenlei",
     "url": "https://github.com/hangwenlei"
@@ -12,7 +12,7 @@
   "interface": {
     "displayName": "Sync Docs",
     "shortDescription": "固化开发现场并安全刷新相关文档",
-    "longDescription": "生成 HANDOFF.md、配置 Codex 新任务读取交接，并通过确认式流程刷新和收敛相关文档。",
+    "longDescription": "分层生成 HANDOFF.md 与分支现场，维护跨 worktree 协同看板，配置新任务读取交接，并自动淘汰过时信息。",
     "developerName": "hangwenlei",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

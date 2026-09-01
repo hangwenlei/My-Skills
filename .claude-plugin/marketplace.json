@@ -13,7 +13,7 @@
     {
       "name": "sync",
       "source": "./plugins/sync",
-      "description": "固化开发现场到 HANDOFF.md 并刷新文档，支持新 session 无缝续接"
+      "description": "分层固化开发现场，支持多 worktree 并行与过时信息淘汰"
     }
   ]
 }
