@@ -9,7 +9,7 @@ allowed-tools: [Read, Write, Edit, Bash]
 
 这是只允许用户手动运行的 Claude Code 入口。
 
-1. 仅当用户通过 `/sync:docs`（可带 `应用 1,3` 参数）调用当前 skill 时继续；
+1. 仅当用户通过 `/sync:docs`（可带 `预览` 参数）调用当前 skill 时继续；
    把宿主声明为 `Claude Code` 并保留全部参数。
 2. 完整读取 `${CLAUDE_PLUGIN_ROOT}/codex/skills/docs/SKILL.md`。读取失败时
    停止并报告，禁止写项目文件。

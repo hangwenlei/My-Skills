@@ -354,6 +354,12 @@ if (Should-Run 'sync') {
       'sync 2.0 配置项清单只记存在性'
     Check ($content -match 'mkdir -p') `
       'sync 2.0 要求写入前创建目录（空目录不进 Git）'
+    Check ($content -notmatch '(?m)^> 更新时间：<当前日期时间>') `
+      'sync 2.0 稳定层模板不再要求全局更新时间戳'
+    Check ($markup -notmatch '整体重写该文件，不追加') `
+      'sync 2.0 不再保留 1.x 的单文件快照式重写指令'
+    Check ($content -notmatch '应用 1,3') `
+      'sync 2.0 不再保留二阶段确认入口'
   }
 
   if (Test-Path -LiteralPath $openaiPath) {
