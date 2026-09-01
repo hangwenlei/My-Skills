@@ -134,8 +134,8 @@ if (Should-Run 'env') {
     Wait-Job -Job $jobs | Out-Null
     Remove-Job -Job $jobs
     $singleText = Get-Content -LiteralPath $singleFile -Raw
-    Check (-not (($singleText -match 'LINE-A') -and ($singleText -match 'LINE-B'))) `
-      'T8 单文件并发写必然丢失一方（故看板禁止单文件）'
+    Check ((($singleText -match 'LINE-A') -xor ($singleText -match 'LINE-B'))) `
+      'T8 单文件后写覆盖先写，只有一方内容存活（故看板禁止单文件）'
 
     $splitDir = Join-Path $scenario.Root 'lines'
     New-Item -ItemType Directory -Path $splitDir -Force | Out-Null
@@ -149,7 +149,7 @@ if (Should-Run 'env') {
     Remove-Job -Job $splitJobs
     Check (((Get-Content -LiteralPath $splitA -Raw) -match 'LINE-A') -and
            ((Get-Content -LiteralPath $splitB -Raw) -match 'LINE-B')) `
-      'T8 分文件并发写两方均无丢失'
+      'T8 分文件各写各的，两方内容均存活'
   } finally {
     Remove-GcScenario $scenario
   }
