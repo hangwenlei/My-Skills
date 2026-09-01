@@ -332,6 +332,8 @@ if (Should-Run 'sync') {
       'sync 2.0 规定哈希输入为 UTF-8 字节'
     Check ($content -match 'git branch --merged') `
       'sync 2.0 用 merged 判据识别已完成分支'
+    Check ($markup -match "frontmatter记录的分支已不在gitbranch") `
+      'sync 2.0 孤儿判据以分支是否存在为主判据'
     Check ($markup -match '(禁止|不得)使用文件mtime') `
       'sync 2.0 禁止用 mtime 做时间判据'
     Check ($content -match '\[待核实\]') `
