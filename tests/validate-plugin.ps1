@@ -332,7 +332,7 @@ if (Should-Run 'sync') {
       'sync 2.0 规定哈希输入为 UTF-8 字节'
     Check ($content -match 'git branch --merged') `
       'sync 2.0 用 merged 判据识别已完成分支'
-    Check ($markup.Contains('禁止使用文件mtime')) `
+    Check ($markup -match '(禁止|不得)使用文件mtime') `
       'sync 2.0 禁止用 mtime 做时间判据'
     Check ($content -match '\[待核实\]') `
       'sync 2.0 定义 L3 语义过期的就地标注'
