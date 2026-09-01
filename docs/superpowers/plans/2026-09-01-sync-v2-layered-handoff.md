@@ -37,7 +37,7 @@
 
 | 文件 | 动作 | 职责 |
 |---|---|---|
-| `tests/gc-scenarios.ps1` | 创建 | 多 worktree 场景搭建、覆盖 9 条 git 行为事实的 11 条断言、两个算法参考实现 |
+| `tests/gc-scenarios.ps1` | 创建 | 多 worktree 场景搭建、覆盖 9 条 git 行为事实的 11 条断言、主干探测 4 级链的 4 条断言、两个算法参考实现 |
 | `tests/validate-plugin.ps1` | 修改 | 移除被 2.0 打破的旧断言，新增 2.0 文本契约断言 |
 | `plugins/sync/codex/skills/docs/SKILL.md` | 修改 | 共享核心，2.0 全部业务指令（主体工作量） |
 | `plugins/sync/skills/docs/SKILL.md` | 修改 | Claude 薄入口，同步参数说明 |
@@ -398,7 +398,7 @@ Run:
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/gc-scenarios.ps1
 ```
 
-Expected: 16 行 `PASS:`（env 11 + algo 5），`全部通过`，退出码 0。
+Expected: 19 行 `PASS:`（env 11 + algo 8），`全部通过`，退出码 0。
 
 - [ ] **Step 6: 提交**
 
@@ -1106,7 +1106,7 @@ Run:
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/gc-scenarios.ps1
 ```
 
-Expected: 16 项 PASS，`全部通过`。
+Expected: 19 项 PASS，`全部通过`。
 
 - [ ] **Step 7: 提交**
 
