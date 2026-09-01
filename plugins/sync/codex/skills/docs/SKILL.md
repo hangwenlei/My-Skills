@@ -24,12 +24,52 @@ description: Use when 用户在 Codex 中显式调用 $sync:docs，或从 /skill
 | Claude Code | `/sync:docs` | `/sync:docs 应用 1,3` | `CLAUDE.md` 的 `@HANDOFF.md` |
 | Codex | `$sync:docs` | `$sync:docs 应用 1,3` | `AGENTS.md` 读取指令 |
 
-## 定位项目根与证据优先级
+## 定位项目根、主干与共享目录
 
-若属于 Git 仓库，运行 `git rev-parse --show-toplevel` 并使用返回目录；
-否则使用当前工作目录。实时 Git、测试和文件状态优先于旧
-`HANDOFF.md`；旧交接只作为线索。发现冲突时在新 HANDOFF 中写当前
+若属于 Git 仓库，运行 `git rev-parse --show-toplevel` 并使用返回目录作为项目根；
+否则使用当前工作目录。各 worktree 的项目根互不相同，这是分支现场天然隔离的基础。
+
+协同看板位于 `git rev-parse --path-format=absolute --git-common-dir` 返回目录下的
+`sync/lines/`。所有 worktree 的该路径指向同一个主仓库 `.git`，因此看板天然跨
+worktree 共享，且不进 Git、不参与 merge。
+
+主干分支按以下优先级探测，**禁止使用 `git config init.defaultBranch`**，其值可能
+与真实主干不符：
+
+1. `git symbolic-ref --quiet refs/remotes/origin/HEAD`，去掉 `refs/remotes/origin/` 前缀
+2. `refs/remotes/origin/main` 或 `refs/remotes/origin/master` 的存在性
+3. `refs/heads/main` 或 `refs/heads/master` 的存在性
+4. 均不可得时，**跳过全部 merged 判据**，仅使用时间判据，并在报告中说明
+
+实时 Git、测试和文件状态优先于旧交接文档；旧交接只作为线索。发现冲突时写入当前
 事实，并把未重新验证的旧结论标为未验证或删除。
+
+## 三层交接布局
+
+按变动频率与归属范围分为三层，各层职责不得混淆。
+
+| 层 | 位置 | 进 Git | 内容 |
+|---|---|---|---|
+| 稳定层 | 项目根 `HANDOFF.md` | 是 | 概览、运行现状、配置项清单、重要文件、长期决策、坑、常用命令 |
+| 分支现场 | `.handoff/<slug>-<hash>.md` | 是 | 任务看板、本分支决策、下一步 |
+| 协同看板 | `<common-dir>/sync/lines/<slug>-<hash>.md` | 否 | 一句话状态、占用文件、最后更新时间 |
+
+文件名生成规则：`slug` 为分支名把 `/ \ : * ? " < > |` 替换为 `-`；`hash` 为
+**完整分支名的 UTF-8 字节**做 SHA-1 后取前 6 位十六进制小写。必须显式使用 UTF-8，
+不得依赖平台默认编码，否则含中文的分支名在不同宿主下会算出不同哈希。加哈希是
+必需的：`feat/auth` 与 `feat-auth` 的 slug 相同，仅靠 slug 会碰撞。
+
+分支现场与看板条目的 frontmatter 必须记录完整分支名与 worktree 路径，读取时校验
+一致性；不一致说明发生了哈希碰撞或文件被手工改名，此时停止写入并报告。
+
+写入任何一层之前必须先 `mkdir -p` 创建目录。空目录不进 Git，新建的 worktree 中
+`.handoff/` 并不存在。
+
+稳定层**不设全局更新时间戳**。1.x 顶部的 `> 更新时间` 行每次调用必变，两个分支
+各运行一次即产生必然冲突。新鲜度由 `git blame` 与各条目的「最后核实」标注承担。
+稳定层顶部改写 `<!-- sync:docs schema=2 -->` 作为版本标记。
+
+稳定层仅在事实确实变化时才修改，禁止无意义重写。
 
 ## 敏感信息与证据读取闸门
 
