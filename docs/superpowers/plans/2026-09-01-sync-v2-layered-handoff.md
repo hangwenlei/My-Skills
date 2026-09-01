@@ -15,7 +15,16 @@
 以下约束适用于每一个任务，不再逐条重复。
 
 - **语言**：全部输出与文档使用简体中文；代码、命令、文件路径、API 名称保持英文；代码注释使用中文；Git 提交信息使用中文。
-- **测试脚本编码**：`tests/*.ps1` 必须保存为 **UTF-8 with BOM**，否则 Windows PowerShell 5.1 解析中文会乱码。
+- **测试脚本编码**：`tests/*.ps1` 必须保存为 **UTF-8 with BOM**，否则 Windows PowerShell 5.1 解析中文会乱码。Write/Edit 工具写出的是无 BOM 的 UTF-8，每次改完都要补 BOM。补 BOM 只能用下面这条命令（三个坑都已踩过）：
+
+  ```powershell
+  $p = (Resolve-Path tests/<脚本名>.ps1).Path
+  $bytes = [System.IO.File]::ReadAllBytes($p)
+  $text = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+  [System.IO.File]::WriteAllText($p, $text, (New-Object System.Text.UTF8Encoding $true))
+  ```
+
+  三个必须避开的坑：① 不能用 `Get-Content -Raw` 读——不指定编码时它按系统代码页（936/GBK）解码无 BOM 的 UTF-8，中文全部变成乱码后又被当作正确内容写回；② 必须 `TrimStart([char]0xFEFF)`——`Encoding.UTF8.GetString()` 不剥离已有 BOM，直接重写会产生双 BOM（`EF BB BF EF BB BF`），PowerShell 会把混入正文的 U+FEFF+`param` 当成未知命令并报 `The term '﻿param' is not recognized`；③ 不能在 Git Bash 里用管道捕获 `powershell.exe` 输出来判断中文是否正确——管道会按控制台代码页转码，正常的中文也会显示成乱码，要验证渲染必须在 PowerShell 中直接运行。验证用 `head -c 3 <文件> | xxd`，必须是单个 `efbbbf`。
 - **文档可移植性**：`docs/` 下的计划与验证文档**不得包含**任何形如 `X:\Users\` 或 `X:/Users/` 的机器用户路径，也不得包含机器用户名数字片段。`tests/validate-plugin.ps1` 的 `docs` section 会强制检查。测试脚本一律使用 `$env:TEMP`。
 - **PowerShell 5.1 兼容**：禁止使用 `&&`、`||`、三元运算符、`??`、`?.`；禁止对原生 exe 使用 `2>&1`；多行字符串使用 here-string 且结束符 `'@` 顶格。
 - **主干探测**：禁止使用 `git config init.defaultBranch` 判定主干分支（实测其值为 `master` 而真实主干为 `main`）。
@@ -28,7 +37,7 @@
 
 | 文件 | 动作 | 职责 |
 |---|---|---|
-| `tests/gc-scenarios.ps1` | 创建 | 多 worktree 场景搭建、9 条 git 行为契约断言、两个算法参考实现 |
+| `tests/gc-scenarios.ps1` | 创建 | 多 worktree 场景搭建、覆盖 9 条 git 行为事实的 11 条断言、两个算法参考实现 |
 | `tests/validate-plugin.ps1` | 修改 | 移除被 2.0 打破的旧断言，新增 2.0 文本契约断言 |
 | `plugins/sync/codex/skills/docs/SKILL.md` | 修改 | 共享核心，2.0 全部业务指令（主体工作量） |
 | `plugins/sync/skills/docs/SKILL.md` | 修改 | Claude 薄入口，同步参数说明 |
@@ -217,8 +226,10 @@ if (Should-Run 'env') {
     Wait-Job -Job $jobs | Out-Null
     Remove-Job -Job $jobs
     $singleText = Get-Content -LiteralPath $singleFile -Raw
-    Check (-not (($singleText -match 'LINE-A') -and ($singleText -match 'LINE-B'))) `
-      'T8 单文件并发写必然丢失一方（故看板禁止单文件）'
+    # 必须用 -xor 断言「恰好一方存活」。弱写法 -not(A -and B) 在两个 job 都没写成
+    # 功时（$null -match 视作空串，两边皆 False）会假绿，从未证明它声称的丢失。
+    Check ((($singleText -match 'LINE-A') -xor ($singleText -match 'LINE-B'))) `
+      'T8 单文件后写覆盖先写，只有一方内容存活（故看板禁止单文件）'
 
     $splitDir = Join-Path $scenario.Root 'lines'
     New-Item -ItemType Directory -Path $splitDir -Force | Out-Null
@@ -232,7 +243,7 @@ if (Should-Run 'env') {
     Remove-Job -Job $splitJobs
     Check (((Get-Content -LiteralPath $splitA -Raw) -match 'LINE-A') -and
            ((Get-Content -LiteralPath $splitB -Raw) -match 'LINE-B')) `
-      'T8 分文件并发写两方均无丢失'
+      'T8 分文件各写各的，两方内容均存活'
   } finally {
     Remove-GcScenario $scenario
   }
@@ -255,7 +266,7 @@ Run:
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/gc-scenarios.ps1 -Section env
 ```
 
-Expected: 9 行 `PASS:`，末尾 `全部通过`，退出码 0。若 `--path-format=absolute` 报错，说明 git 低于 2.31，升级 git 后重跑。
+Expected: 11 行 `PASS:`（7 条技术事实共 11 个断言），末尾 `全部通过`，退出码 0。若 `--path-format=absolute` 报错，说明 git 低于 2.31，升级 git 后重跑。
 
 - [ ] **Step 5: 确认临时目录已清理干净**
 
@@ -387,7 +398,7 @@ Run:
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/gc-scenarios.ps1
 ```
 
-Expected: 14 行 `PASS:`，`全部通过`，退出码 0。
+Expected: 16 行 `PASS:`（env 11 + algo 5），`全部通过`，退出码 0。
 
 - [ ] **Step 6: 提交**
 
@@ -1095,7 +1106,7 @@ Run:
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/gc-scenarios.ps1
 ```
 
-Expected: 14 项 PASS，`全部通过`。
+Expected: 16 项 PASS，`全部通过`。
 
 - [ ] **Step 7: 提交**
 
