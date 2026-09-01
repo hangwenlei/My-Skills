@@ -122,7 +122,7 @@ if (Should-Run 'distribution') {
 
   foreach ($plugin in @(
     @{ Name = 'chinese'; Version = '1.1.0' },
-    @{ Name = 'sync'; Version = '1.2.0' }
+    @{ Name = 'sync'; Version = '2.0.0' }
   )) {
     $name = $plugin.Name
     $claudeManifestPath = Join-Path $root "plugins\$name\.claude-plugin\plugin.json"
