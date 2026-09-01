@@ -464,7 +464,7 @@ function Remove-Markup($text) {
 
 - [ ] **Step 3: 在 sync section 的 `if (Test-Path -LiteralPath $codexSkillPath) {` 区块内追加 2.0 契约断言**
 
-追加到该区块末尾（`}` 之前）。首行先建立 markup 归一化文本，后面两条断言依赖它——
+追加到该区块末尾（`}` 之前）。首行先建立 markup 归一化文本，后面共 9 条断言依赖它——
 它们要匹配的原文分别含反引号和 `**`，用 `Remove-Whitespace` 会漏匹配：
 
 ```powershell
