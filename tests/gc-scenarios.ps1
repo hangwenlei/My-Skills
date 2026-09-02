@@ -1,5 +1,5 @@
 ﻿param(
-  [ValidateSet('all', 'env', 'algo')]
+  [ValidateSet('all', 'env', 'algo', 'scenario')]
   [string]$Section = 'all'
 )
 
@@ -149,6 +149,261 @@ function New-RemoteScenario {
   return [pscustomobject]@{ Root = $root; Repo = $repo; Origin = $origin }
 }
 
+# ===========================================================================
+# scenario section 的判据实现与场景工厂
+# 这一节验证什么、不验证什么，见下面 `if (Should-Run 'scenario')` 顶部的说明。
+# 下列函数是 SKILL.md「信息淘汰」散文判据的 PowerShell 重写，二者靠人工保持
+# 一致：改判据时必须两边一起改，否则测试会继续为一份已经过时的规则背书。
+# ===========================================================================
+
+function Invoke-GitCapture {
+  param([string]$Repo, [string[]]$GitArgs)
+  # 需要同时拿到 stdout、stderr 和 exit code 时用它。Windows PowerShell 5.1 下
+  # 不能用 2>&1 把原生 exe 的 stderr 并进管道：每行会被包成 ErrorRecord，
+  # 且 $? 变 false，判据会被这层包装误导。改用 System.Diagnostics.Process，
+  # 与 SKILL.md「敏感信息与证据读取闸门」推荐的可靠本地捕获形式一致。
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = 'git'
+  $psi.Arguments = ((@('-C', $Repo) + $GitArgs) | ForEach-Object { '"' + $_ + '"' }) -join ' '
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $proc = [System.Diagnostics.Process]::Start($psi)
+  # 先建异步读取任务再 WaitForExit：任一管道写满 4KB 缓冲都会造成死锁
+  $outTask = $proc.StandardOutput.ReadToEndAsync()
+  $errTask = $proc.StandardError.ReadToEndAsync()
+  $proc.WaitForExit()
+  $captured = [pscustomobject]@{
+    Out  = $outTask.Result
+    Err  = $errTask.Result
+    Code = $proc.ExitCode
+  }
+  $proc.Dispose()
+  return $captured
+}
+
+function Get-BranchNameCandidate {
+  param([string]$Repo, [string]$BranchName)
+  # SKILL.md：比对时 `<分支名>` 与 `<remote>/<分支名>` 任一命中即算分支仍存在。
+  # 候选用 git remote 列出的真实 remote 名拼，不靠「按斜杠切一刀」猜——
+  # 分支名自己就可能带斜杠（feat/auth 的远端短名是 origin/feat/auth）。
+  $candidates = @($BranchName)
+  foreach ($remote in @(& git -C $Repo remote)) {
+    if (-not [string]::IsNullOrWhiteSpace($remote)) {
+      $candidates += ('{0}/{1}' -f $remote.Trim(), $BranchName)
+    }
+  }
+  return $candidates
+}
+
+function Get-BranchPresentMatch {
+  param([string]$Repo, [string]$BranchName, [switch]$LocalOnly)
+  # tier 1 的实际命中项：既是分支存在性判据的依据，也是 tier 3 第 2 顺位修订的来源
+  # （SKILL.md：解析不到裸名时，改试 tier 1 在 branch -a 输出里实际命中的那个短名）。
+  # -LocalOnly 复现修复前只查本地的 `git branch` 形态，供鉴别力断言使用。
+  $branchArgs = @('branch')
+  if (-not $LocalOnly) { $branchArgs += '-a' }
+  $branchArgs += '--format=%(refname:short)'
+  $listed = @(@(& git -C $Repo @branchArgs) | ForEach-Object { $_.Trim() })
+  $candidates = Get-BranchNameCandidate -Repo $Repo -BranchName $BranchName
+  return @($candidates | Where-Object { $listed -contains $_ })
+}
+
+function Test-BranchPresent {
+  param([string]$Repo, [string]$BranchName, [switch]$LocalOnly)
+  # tier 1：分支是否仍存在。本地没有、远端还有的分支绝不算消失。
+  return (@(Get-BranchPresentMatch -Repo $Repo -BranchName $BranchName -LocalOnly:$LocalOnly).Count -gt 0)
+}
+
+function Test-BranchMerged {
+  param([string]$Repo, [string]$BranchName, [string]$MainBranch, [switch]$LocalOnly)
+  # tier 2：是否已合并进主干，判定用 `git branch -a --merged <主干>`。
+  # 主干不可探测时本判据跳过（SKILL.md：只有 merged 判据需要主干，
+  # 另外两条不需要，不得因主干探测失败连带停掉整个孤儿回收）。
+  if ([string]::IsNullOrWhiteSpace($MainBranch)) { return $false }
+  $branchArgs = @('branch')
+  if (-not $LocalOnly) { $branchArgs += '-a' }
+  $branchArgs += @('--merged', $MainBranch, '--format=%(refname:short)')
+  $listed = @(@(& git -C $Repo @branchArgs) | ForEach-Object { $_.Trim() })
+  $candidates = Get-BranchNameCandidate -Repo $Repo -BranchName $BranchName
+  return (@($candidates | Where-Object { $listed -contains $_ }).Count -gt 0)
+}
+
+function Resolve-BranchRevision {
+  param([string]$Repo, [string]$BranchName, [switch]$BareOnly)
+  # SKILL.md 的 `<分支修订>` 解析顺序：先裸分支名，再 tier 1 命中的
+  # `<remote>/<分支名>`；两者都解析不到时返回 $null，调用方据此走「不动作」。
+  # 可解析性用 `git rev-parse --verify --quiet` 判定：不可解析时静默 exit 1，
+  # 不像 git log 那样打出 fatal 噪音。
+  # -BareOnly 复现修复前只认裸名的形态，供鉴别力断言使用。
+  $ordered = @($BranchName)
+  if (-not $BareOnly) {
+    foreach ($hit in Get-BranchPresentMatch -Repo $Repo -BranchName $BranchName) {
+      if ($hit -ne $BranchName) { $ordered += $hit }
+    }
+  }
+  foreach ($candidate in $ordered) {
+    & git -C $Repo rev-parse --verify --quiet $candidate | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $candidate }
+  }
+  return $null
+}
+
+function Get-BranchIdleState {
+  param([string]$Repo, [string]$BranchName, [int]$IdleDay = 14, [switch]$BareOnly)
+  # tier 3：三态返回，'IDLE' 超过阈值、'ACTIVE' 未超过、'NOOP' 修订解析不到。
+  # 'NOOP' 必须与 'IDLE' 严格区分：取不到提交时间不等于长期无活动。把解析失败
+  # 沿用「超过 14 天」那条分支，等于拿一次错误当删除依据，方向恰好反了。
+  $revision = Resolve-BranchRevision -Repo $Repo -BranchName $BranchName -BareOnly:$BareOnly
+  if ($null -eq $revision) { return 'NOOP' }
+  # 只取 %cI（ISO 8601 提交时间）：不带 --format 的 git log 会把 commit subject
+  # 带进上下文，而 subject 属证据读取闸门管辖，判据不该在这里绕开它。
+  $stamp = (@(& git -C $Repo log -1 --format=%cI $revision) -join '').Trim()
+  if ([string]::IsNullOrWhiteSpace($stamp)) { return 'NOOP' }
+  $age = ([datetimeoffset]::Now - [datetimeoffset]::Parse($stamp)).TotalDays
+  if ($age -gt $IdleDay) { return 'IDLE' }
+  return 'ACTIVE'
+}
+
+function Get-HandoffVerdict {
+  param(
+    [string]$Repo,
+    [string]$BranchName,
+    [string]$MainBranch,
+    [int]$IdleDay = 14,
+    [ValidateSet('current', 'legacy-local', 'legacy-wide-tier1')]
+    [string]$Mode = 'current'
+  )
+  # 对一个 .handoff/ 现场文件依次跑 L1 的三条判据，产出本轮裁决：
+  #   COLLECT  提炼决策后删除（tier 1 或 tier 2 命中）
+  #   DORMANT  转入 L2 休眠流程（tier 3 命中）
+  #   KEEP     本轮不动它（含 tier 3 因修订解析不到而不动作）
+  # Mode 复现两个历史形态，让每条场景断言都能自证有鉴别力：
+  #   legacy-local       三条判据全是本地视角 —— 第一次事故：新 clone 全量误删
+  #   legacy-wide-tier1  只把 tier 1 放宽到 -a —— 第二次事故：孤儿回收成死规则
+  $localTier1 = ($Mode -eq 'legacy-local')
+  $localTier2 = ($Mode -ne 'current')
+  $bareTier3 = ($Mode -ne 'current')
+
+  if (-not (Test-BranchPresent -Repo $Repo -BranchName $BranchName -LocalOnly:$localTier1)) {
+    return 'COLLECT'
+  }
+  if (Test-BranchMerged -Repo $Repo -BranchName $BranchName -MainBranch $MainBranch -LocalOnly:$localTier2) {
+    return 'COLLECT'
+  }
+  if ((Get-BranchIdleState -Repo $Repo -BranchName $BranchName -IdleDay $IdleDay -BareOnly:$bareTier3) -eq 'IDLE') {
+    return 'DORMANT'
+  }
+  return 'KEEP'
+}
+
+# 场景工厂：全部建在 $env:TEMP 下，根目录登记进 $script:scenarioRoot，
+# 供本节末尾的零残留断言核对。
+$script:scenarioRoot = @()
+
+function New-ScenarioRoot {
+  param([string]$Tag)
+  $root = Join-Path $env:TEMP ('sync-scn-' + $Tag + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+  New-Item -ItemType Directory -Path $root -Force | Out-Null
+  $script:scenarioRoot += $root
+  return $root
+}
+
+function Initialize-ScenarioRepo {
+  param([string]$Path)
+  & git init -q $Path | Out-Null
+  # 不用 git init -b，兼容 2.28 以前的版本
+  & git -C $Path symbolic-ref HEAD refs/heads/main | Out-Null
+  & git -C $Path config user.email 'test@example.com' | Out-Null
+  & git -C $Path config user.name 'sync-test' | Out-Null
+}
+
+function Add-ScenarioCommit {
+  param([string]$Repo, [string]$FileName, [string]$Message, [string]$IsoDate)
+  # 指定 $IsoDate 时必须同时设 AUTHOR 与 COMMITTER：时间判据读的是 %cI（提交
+  # 时间），而 `git commit --date` 只改作者时间，改不动它。
+  Set-Content -LiteralPath (Join-Path $Repo $FileName) -Value $Message -Encoding utf8
+  & git -C $Repo add -A | Out-Null
+  if ([string]::IsNullOrWhiteSpace($IsoDate)) {
+    & git -C $Repo commit -q -m $Message | Out-Null
+    return
+  }
+  $env:GIT_AUTHOR_DATE = $IsoDate
+  $env:GIT_COMMITTER_DATE = $IsoDate
+  try {
+    & git -C $Repo commit -q -m $Message | Out-Null
+  } finally {
+    Remove-Item Env:GIT_AUTHOR_DATE -ErrorAction SilentlyContinue
+    Remove-Item Env:GIT_COMMITTER_DATE -ErrorAction SilentlyContinue
+  }
+}
+
+function New-OriginScenario {
+  param([string]$Tag)
+  # 「bare origin + 一份 seed 工作仓库」，是全部 clone 场景的共同底座。
+  # bare 仓库的 HEAD 必须显式指回 refs/heads/main：默认 HEAD 指向
+  # refs/heads/master，clone 时会 warning: remote HEAD refers to nonexistent ref
+  # 且不检出任何本地分支——那样场景就不再是「一份正常的新 clone」，
+  # 后面 tier 2 连 <主干> 都解析不到，测的是另一回事了。
+  $root = New-ScenarioRoot -Tag $Tag
+  $origin = Join-Path $root 'origin.git'
+  & git init -q --bare $origin | Out-Null
+  & git -C $origin symbolic-ref HEAD refs/heads/main | Out-Null
+  $seed = Join-Path $root 'seed'
+  New-Item -ItemType Directory -Path $seed -Force | Out-Null
+  Initialize-ScenarioRepo -Path $seed
+  Add-ScenarioCommit -Repo $seed -FileName 'seed.md' -Message 'init'
+  & git -C $seed remote add origin $origin | Out-Null
+  & git -C $seed push -q origin main | Out-Null
+  return [pscustomobject]@{ Root = $root; Origin = $origin; Seed = $seed }
+}
+
+function New-ScenarioClone {
+  param($Scenario, [string]$Name = 'clone')
+  $clone = Join-Path $Scenario.Root $Name
+  & git clone -q $Scenario.Origin $clone | Out-Null
+  & git -C $clone config user.email 'test@example.com' | Out-Null
+  & git -C $clone config user.name 'sync-test' | Out-Null
+  return $clone
+}
+
+function Add-ScenarioHandoff {
+  param([string]$Repo, [string]$BranchName, [string]$FileName)
+  # 造一份真实形状的分支现场文件：frontmatter 记录完整分支名与 worktree 路径。
+  $dir = Join-Path $Repo '.handoff'
+  New-Item -ItemType Directory -Path $dir -Force | Out-Null
+  $content = @(
+    '---',
+    ('branch: {0}' -f $BranchName),
+    ('worktree: {0}' -f $Repo),
+    '---',
+    '',
+    '## 🧠 本分支决策',
+    '',
+    '- 占位决策，用于验证删除前的决策提炼有东西可提'
+  ) -join "`n"
+  Set-Content -LiteralPath (Join-Path $dir $FileName) -Value $content -Encoding utf8
+  return (Join-Path $dir $FileName)
+}
+
+function Get-HandoffBranchName {
+  param([string]$Path)
+  # 判据的输入取自现场文件 frontmatter 里的**完整分支名**，不从文件名反推——
+  # 文件名经过 slug 化与哈希，不可逆。必须显式 UTF-8 读取。
+  foreach ($line in @(Get-Content -LiteralPath $Path -Encoding UTF8)) {
+    if ($line -match '^branch:\s*(.+)$') { return $Matches[1].Trim() }
+  }
+  return $null
+}
+
+function Remove-ScenarioTree {
+  param([string]$Root)
+  # 这些场景不建 worktree，因此不需要 Remove-GcScenario 的 worktree 拆除步骤。
+  if ([string]::IsNullOrWhiteSpace($Root)) { return }
+  Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 if (Should-Run 'env') {
   $scenario = $null
   try {
@@ -288,6 +543,224 @@ if (Should-Run 'algo') {
   } finally {
     Remove-GcScenario $noMainScenario
   }
+}
+
+if (Should-Run 'scenario') {
+  # =========================================================================
+  # 本节测的是什么、**不是**什么——先说清楚，免得后来人把绿灯读错。
+  #
+  # 【测的是】把 SKILL.md「信息淘汰」小节的判据用 PowerShell 重写一份（上面那组
+  #   Test-BranchPresent / Test-BranchMerged / Resolve-BranchRevision /
+  #   Get-BranchIdleState / Get-HandoffVerdict），在真实建出来的 git 仓库上跑，
+  #   核对它在四类真实处境下给出的裁决。已经逃逸过两次的缺陷都属于这一类：
+  #   新 clone 把同事的现场文件全判成孤儿、以及「推送 → 合并 → 删远端分支」
+  #   之后三条判据同时落空。文本匹配断言看不见它们，只有把仓库真的建出来才会暴露。
+  #
+  # 【不测的是】skill 本身没有被执行，一次也没有。SKILL.md 的实现是自然语言指令，
+  #   由 AI 在运行时阅读，并据此对用户的真实仓库执行创建、重写和**删除**。测试
+  #   框架无法驱动「一个照着散文办事的模型」。因此本节全绿只证明**判据本身是对
+  #   的**，不证明**AI 会照着判据做**。这个缺口依然存在，不要把本节的绿灯读成
+  #   「这个 skill 已经验证过了」。
+  #
+  # 【于是】上面的判据函数与 SKILL.md 的散文是两份靠人工同步的实现。改任何一边
+  #   都必须同时改另一边并重跑本节；否则测试会继续为一份已经过时的规则背书，
+  #   那比没有测试更危险。
+  #
+  # 每条场景都必须有**鉴别力**：先用 Get-HandoffVerdict 的 legacy-* 模式跑出错误
+  # 裁决，再用 current 模式跑出正确裁决。两种模式给同一个答案的场景什么也没测到。
+  # =========================================================================
+
+  # --- 场景 1：新 clone 不得删掉同事的现场文件 ---
+  # bare origin 上有若干分支，clone 下来本地只有一个；.handoff/ 里躺着一份属于
+  # 「远端独有且未合并」分支的现场文件。正确裁决是 KEEP。旧的只查本地
+  # `git branch` 的 tier 1 会给出 COLLECT——那正是大规模误删事故本身。
+  $freshScenario = $null
+  try {
+    $freshScenario = New-OriginScenario -Tag 'fresh'
+    foreach ($colleague in @('feat/colleague-a', 'feat/colleague-b')) {
+      & git -C $freshScenario.Seed checkout -q -b $colleague main | Out-Null
+      Add-ScenarioCommit -Repo $freshScenario.Seed `
+        -FileName ('{0}.md' -f ($colleague -replace '/', '-')) `
+        -Message ('work on {0}' -f $colleague)
+      & git -C $freshScenario.Seed push -q origin $colleague | Out-Null
+    }
+    & git -C $freshScenario.Seed checkout -q main | Out-Null
+    $freshClone = New-ScenarioClone -Scenario $freshScenario
+
+    $freshLocal = @(& git -C $freshClone branch --format='%(refname:short)')
+    Check ($freshLocal.Count -eq 1 -and $freshLocal -contains 'main') `
+      'S1 新 clone 本地只有一个分支，同事的分支只以远端追踪引用存在'
+
+    $freshFile = Get-BranchFileName 'feat/colleague-a'
+    $freshPath = Add-ScenarioHandoff -Repo $freshClone -BranchName 'feat/colleague-a' -FileName $freshFile
+    $freshBranch = Get-HandoffBranchName -Path $freshPath
+    Check ($freshBranch -eq 'feat/colleague-a') `
+      'S1 判据输入取自现场文件 frontmatter 的完整分支名，不从文件名反推'
+
+    $freshMain = Resolve-MainBranch -Repo $freshClone
+    Check ($freshMain -eq 'main') `
+      'S1 新 clone 中主干经 origin/HEAD 探测为 main'
+
+    Check (-not (Test-BranchPresent -Repo $freshClone -BranchName $freshBranch -LocalOnly)) `
+      'S1 鉴别力：只查本地的旧 tier 1 认定同事的分支「已不存在」'
+    Check ((Get-HandoffVerdict -Repo $freshClone -BranchName $freshBranch -MainBranch $freshMain -Mode 'legacy-local') -eq 'COLLECT') `
+      'S1 鉴别力：修复前的判据把同事正在开发的现场文件判为删除'
+
+    Check ((Get-BranchPresentMatch -Repo $freshClone -BranchName $freshBranch) -contains 'origin/feat/colleague-a') `
+      'S1 现行 tier 1 在 branch -a 输出中命中 origin/feat/colleague-a'
+    Check (Test-BranchPresent -Repo $freshClone -BranchName $freshBranch) `
+      'S1 本地没有、远端还有的分支不算已消失'
+    Check (-not (Test-BranchMerged -Repo $freshClone -BranchName $freshBranch -MainBranch $freshMain)) `
+      'S1 该分支确实未合并进主干，tier 2 不命中'
+    Check ((Get-BranchIdleState -Repo $freshClone -BranchName $freshBranch) -eq 'ACTIVE') `
+      'S1 tier 3 经 origin/ 短名取到提交时间，判为活跃'
+    Check ((Get-HandoffVerdict -Repo $freshClone -BranchName $freshBranch -MainBranch $freshMain) -eq 'KEEP') `
+      'S1 现行判据给出 KEEP，新 clone 不再误删同事的现场文件'
+    Check (Test-Path -LiteralPath $freshPath) `
+      'S1 场景结束时该现场文件仍在（KEEP 的实际含义）'
+  } finally {
+    Remove-ScenarioTree $freshScenario.Root
+  }
+
+  # --- 场景 2：推送 → 合并 → 删远端分支，之后仍必须可回收 ---
+  # GitHub 的默认流程。clone 先 fetch 到 origin/<分支名>；远端合并并删除该分支后，
+  # 本地只做普通 `git fetch`（不带 --prune），陈旧的 origin/<分支名> 于是留了下来。
+  # 正确裁决是 COLLECT（tier 2 用 -a 命中）。只把 tier 1 放宽到 -a 的中间形态会
+  # 给出 KEEP：tier 1 看见陈旧引用说「还在」，tier 2 只查本地看不见它，tier 3 拿
+  # 裸名解析必然失败——三条判据同时落空，孤儿从此只增不减。
+  $shippedScenario = $null
+  try {
+    $shippedScenario = New-OriginScenario -Tag 'shipped'
+    & git -C $shippedScenario.Seed checkout -q -b 'feat/shipped' main | Out-Null
+    Add-ScenarioCommit -Repo $shippedScenario.Seed -FileName 'shipped.md' -Message 'shipped work'
+    & git -C $shippedScenario.Seed push -q origin 'feat/shipped' | Out-Null
+    # clone 必须建在远端删除之前，才会留下一份陈旧的 origin/feat/shipped
+    $shippedClone = New-ScenarioClone -Scenario $shippedScenario
+    & git -C $shippedScenario.Seed checkout -q main | Out-Null
+    & git -C $shippedScenario.Seed merge -q --no-ff 'feat/shipped' -m 'merge feat/shipped' | Out-Null
+    & git -C $shippedScenario.Seed push -q origin main | Out-Null
+    & git -C $shippedScenario.Seed push -q origin --delete 'feat/shipped' | Out-Null
+    # 关键：普通 fetch，不带 --prune
+    & git -C $shippedClone fetch -q origin | Out-Null
+    & git -C $shippedClone merge -q --ff-only origin/main | Out-Null
+
+    $shippedMain = Resolve-MainBranch -Repo $shippedClone
+    Check ($shippedMain -eq 'main') `
+      'S2 clone 中主干经 origin/HEAD 探测为 main'
+    Check ((Get-BranchPresentMatch -Repo $shippedClone -BranchName 'feat/shipped') -contains 'origin/feat/shipped') `
+      'S2 普通 fetch 不清理陈旧引用，origin/feat/shipped 仍留在 branch -a 输出中'
+    Check (Test-BranchPresent -Repo $shippedClone -BranchName 'feat/shipped') `
+      'S2 tier 1 因陈旧引用判定分支仍在，不命中（这不是缺陷，是它该有的行为）'
+
+    Check (-not (Test-BranchMerged -Repo $shippedClone -BranchName 'feat/shipped' -MainBranch $shippedMain -LocalOnly)) `
+      'S2 鉴别力：只查本地的旧 tier 2 不列远端追踪分支，不命中'
+    Check ($null -eq (Resolve-BranchRevision -Repo $shippedClone -BranchName 'feat/shipped' -BareOnly)) `
+      'S2 鉴别力：旧 tier 3 拿裸分支名当修订，本地 ref 已删必然解析失败'
+    Check ((Get-HandoffVerdict -Repo $shippedClone -BranchName 'feat/shipped' -MainBranch $shippedMain -Mode 'legacy-wide-tier1') -eq 'KEEP') `
+      'S2 鉴别力：只放宽 tier 1 时三条判据同时落空，孤儿回收变成死规则'
+
+    Check (Test-BranchMerged -Repo $shippedClone -BranchName 'feat/shipped' -MainBranch $shippedMain) `
+      'S2 现行 tier 2 用 branch -a --merged 命中 origin/feat/shipped'
+    Check ((Get-HandoffVerdict -Repo $shippedClone -BranchName 'feat/shipped' -MainBranch $shippedMain) -eq 'COLLECT') `
+      'S2 现行判据给出 COLLECT，GitHub 默认流程下的孤儿可以被回收'
+  } finally {
+    Remove-ScenarioTree $shippedScenario.Root
+  }
+
+  # --- 场景 3：只剩远端追踪引用的沉寂分支，时间判据必须解析得到 ---
+  # 分支只以 refs/remotes/origin/<分支名> 存在，最后一次提交在 60 天前。正确行为：
+  # <分支修订> 退到 origin/<分支名>，取到真实 ISO 时间戳，裁决 DORMANT（转入 L2）。
+  # 旧的只认裸名的形态取不到任何时间戳；而 SKILL.md 的安全底线是——解析失败
+  # 一律「不动作」（NOOP），绝不能读成「长期无活动」。
+  $idleScenario = $null
+  try {
+    $idleScenario = New-OriginScenario -Tag 'idle'
+    & git -C $idleScenario.Seed checkout -q -b 'feat/idle' main | Out-Null
+    $idleStamp = (Get-Date).AddDays(-60).ToString('yyyy-MM-ddTHH:mm:sszzz')
+    Add-ScenarioCommit -Repo $idleScenario.Seed -FileName 'idle.md' -Message 'idle work' -IsoDate $idleStamp
+    & git -C $idleScenario.Seed push -q origin 'feat/idle' | Out-Null
+    & git -C $idleScenario.Seed checkout -q main | Out-Null
+    $idleClone = New-ScenarioClone -Scenario $idleScenario
+    $idleMain = Resolve-MainBranch -Repo $idleClone
+
+    Check ($null -eq (Resolve-BranchRevision -Repo $idleClone -BranchName 'feat/idle' -BareOnly)) `
+      'S3 鉴别力：裸分支名对只剩远端追踪引用的分支解析不到'
+    $idleBareLog = Invoke-GitCapture -Repo $idleClone -GitArgs @('log', '-1', '--format=%cI', 'feat/idle')
+    Check ($idleBareLog.Code -eq 128) `
+      'S3 鉴别力：把裸分支名直接传给 git log 会以 exit 128 失败'
+    Check ($idleBareLog.Err -match 'ambiguous argument') `
+      'S3 鉴别力：失败信息正是 SKILL.md 记录的 fatal: ambiguous argument'
+    Check ((Get-BranchIdleState -Repo $idleClone -BranchName 'feat/idle' -BareOnly) -eq 'NOOP') `
+      'S3 鉴别力：旧形态下这条沉寂分支的时间判据只能落空'
+
+    $idleRevision = Resolve-BranchRevision -Repo $idleClone -BranchName 'feat/idle'
+    Check ($idleRevision -eq 'origin/feat/idle') `
+      'S3 <分支修订> 第 2 顺位退到 tier 1 命中的 origin/feat/idle'
+    $idleIso = (@(& git -C $idleClone log -1 --format=%cI $idleRevision) -join '').Trim()
+    Check ($idleIso -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$') `
+      'S3 时间判据拿到真实 ISO 8601 提交时间，而不是报错'
+    $idleAge = ([datetimeoffset]::Now - [datetimeoffset]::Parse($idleIso)).TotalDays
+    Check ($idleAge -gt 14 -and $idleAge -lt 61) `
+      'S3 取到的时间戳确实是 60 天前那一次提交'
+    Check ((Get-BranchIdleState -Repo $idleClone -BranchName 'feat/idle') -eq 'IDLE') `
+      'S3 超过 14 天，tier 3 判为 IDLE'
+    Check ((Get-HandoffVerdict -Repo $idleClone -BranchName 'feat/idle' -MainBranch $idleMain) -eq 'DORMANT') `
+      'S3 tier 3 命中后转入 L2 休眠流程，而不是直接删除'
+
+    # 安全底线：两种形式都解析不到时是「不动作」，不是「无活动」。现实中 tier 1
+    # 命中后修订通常都解析得到，这条守的是两次调用之间 ref 被删、或短名解析异常
+    # 的情形——要点是解析失败绝不能沿用「超过 14 天」那条分支。
+    Check ($null -eq (Resolve-BranchRevision -Repo $idleClone -BranchName 'feat/never-existed')) `
+      'S3 裸名与 origin/ 短名都解析不到时返回 $null'
+    Check ((Get-BranchIdleState -Repo $idleClone -BranchName 'feat/never-existed') -eq 'NOOP') `
+      'S3 修订解析失败给出 NOOP 不动作'
+    Check ((Get-BranchIdleState -Repo $idleClone -BranchName 'feat/never-existed') -ne 'IDLE') `
+      'S3 修订解析失败绝不被读成「长期无活动」'
+  } finally {
+    Remove-ScenarioTree $idleScenario.Root
+  }
+
+  # --- 场景 4：游离 HEAD 没有分支身份 ---
+  # SKILL.md 禁止用 `git rev-parse --abbrev-ref HEAD` 取当前分支名，理由是它在游离
+  # HEAD 时返回字面量 HEAD，会被当成一个叫 HEAD 的分支名。这里让两条命令在同一个
+  # 仓库状态上给出不同答案，「该用哪条」的鉴别力就在这个差值里。
+  $detachedRoot = $null
+  try {
+    $detachedRoot = New-ScenarioRoot -Tag 'detached'
+    $detachedRepo = Join-Path $detachedRoot 'repo'
+    New-Item -ItemType Directory -Path $detachedRepo -Force | Out-Null
+    Initialize-ScenarioRepo -Path $detachedRepo
+    Add-ScenarioCommit -Repo $detachedRepo -FileName 'first.md' -Message 'first'
+    Add-ScenarioCommit -Repo $detachedRepo -FileName 'second.md' -Message 'second'
+    $detachedHead = (@(& git -C $detachedRepo rev-parse HEAD) -join '').Trim()
+    & git -C $detachedRepo checkout -q --detach $detachedHead | Out-Null
+
+    $detachedShown = Invoke-GitCapture -Repo $detachedRepo -GitArgs @('branch', '--show-current')
+    Check ($detachedShown.Code -eq 0) `
+      'S4 游离 HEAD 下 git branch --show-current 的 exit code 仍是 0'
+    Check ($detachedShown.Out.Trim() -eq '') `
+      'S4 游离 HEAD 的检测信号是输出为空串，不是 exit code'
+    $detachedAbbrev = Invoke-GitCapture -Repo $detachedRepo -GitArgs @('rev-parse', '--abbrev-ref', 'HEAD')
+    Check ($detachedAbbrev.Code -eq 0 -and $detachedAbbrev.Out.Trim() -eq 'HEAD') `
+      'S4 同一状态下 rev-parse --abbrev-ref HEAD 返回字面量 HEAD'
+    Check ($detachedShown.Out.Trim() -ne $detachedAbbrev.Out.Trim()) `
+      'S4 鉴别力：两条命令在同一状态下给出不同答案，用错那条会造出名为 HEAD 的假分支'
+    $detachedNative = @(& git -C $detachedRepo branch --show-current)
+    Check ($detachedNative.Count -eq 0) `
+      'S4 PowerShell 下空输出不产生任何对象，判空前必须先 join 成字符串'
+
+    & git -C $detachedRepo checkout -q main | Out-Null
+    $attachedShown = Invoke-GitCapture -Repo $detachedRepo -GitArgs @('branch', '--show-current')
+    Check ($attachedShown.Out.Trim() -eq 'main') `
+      'S4 对照：回到 main 后 show-current 返回真实分支名，空串确由游离 HEAD 造成'
+  } finally {
+    Remove-ScenarioTree $detachedRoot
+  }
+
+  # 零残留核对：本节全部场景目录都建在 $env:TEMP 下，且都已在 finally 中删除
+  $scenarioResidue = @($script:scenarioRoot | Where-Object { Test-Path -LiteralPath $_ })
+  Check ($scenarioResidue.Count -eq 0) `
+    ('S0 本节建立的 {0} 个临时场景目录已全部清理，无残留' -f @($script:scenarioRoot).Count)
 }
 
 if ($script:fail -gt 0) {
