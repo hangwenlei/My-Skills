@@ -6,7 +6,7 @@
 `My-Skills` 是同时面向 Claude Code 与 Codex 发布的个人技能市场，仓库
 `https://github.com/hangwenlei/My-Skills`，含 `chinese`（1.1.0）与 `sync`（2.0.1）
 两个插件。`sync` 2.0 于 2026-09-01 完成分层交接改造并合并到 `main`；同日首次真实运行
-暴露 tier 2 对主干自身恒为已合并的缺陷，以 2.0.1 热修。`main` 与 `origin/main` 同为 `b81547f`。
+暴露 tier 2 对主干自身恒为已合并的缺陷，以 2.0.1（`b81547f`）热修并发布。
 
 本文件为 2.0 三层布局中的**稳定层**：只记跨分支成立的慢变事实。执行状态见
 `.handoff/` 下与当前分支对应的现场文件；并行线看板在 common dir 的 `sync/lines/`。
@@ -16,7 +16,7 @@
 - 发布渠道：GitHub 仓库即 marketplace。Claude Code 用 `/plugin marketplace add
   hangwenlei/My-Skills` 后 `/plugin install <name>@my-skills`；Codex 用
   `codex plugin marketplace add hangwenlei/My-Skills` 后 `codex plugin add <name>@my-skills`。
-- 本机 Claude Code：`sync@my-skills` 2.0.1（user scope，enabled），重启后加载；
+- 本机 Claude Code：`sync@my-skills` 2.0.1（user scope，enabled，已加载）；
   `chinese@my-skills` 1.1.0。
 - 本机 Codex：`sync@my-skills` 2.0.1（installed, enabled），新开任务后加载。
 - 无部署服务、无端口、无外部依赖。
@@ -73,6 +73,9 @@
   禁止心算；macOS 无 `sha1sum`。
 - 取当前分支名用 `git branch --show-current`，输出为空即游离 HEAD；不用
   `rev-parse --abbrev-ref HEAD`（游离时输出字面量 `HEAD`）。
+- **稳定层不记当前 HEAD 提交号**——它每次提交必变，等价于一个伪装的全局时间戳，
+  会让每次 `/sync:docs` 都产生一行无意义 diff。只记发布里程碑的提交号（如 2.0.1 的
+  `b81547f`）。此坑由 2.0.1 首次真实链路运行暴露：迁移时概览里写了当时的 HEAD。
 - 2.0.0 的 tier 2 有两处缺陷，均于 2.0.1 修复：对主干自身恒为已合并（会每次删掉主干
   现场文件，T15）；主干名不可解析为本地修订时 exit 128 静默失效（现按 `<主干修订>`
   解析，两形式都不解析则跳过 tier 2 并报告）。
