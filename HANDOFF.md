@@ -4,9 +4,9 @@
 ## 概览
 
 `My-Skills` 是同时面向 Claude Code 与 Codex 发布的个人技能市场，仓库
-`https://github.com/hangwenlei/My-Skills`，含 `chinese`（1.1.0）与 `sync`（2.0.0）
-两个插件。`sync` 2.0 于 2026-09-01 完成分层交接改造并 fast-forward 合并到 `main`，
-`main` 与 `origin/main` 同为 `3bdfa37`。
+`https://github.com/hangwenlei/My-Skills`，含 `chinese`（1.1.0）与 `sync`（2.0.1）
+两个插件。`sync` 2.0 于 2026-09-01 完成分层交接改造并合并到 `main`；同日首次真实运行
+暴露 tier 2 对主干自身恒为已合并的缺陷，以 2.0.1 热修。`main` 与 `origin/main` 同为 `b81547f`。
 
 本文件为 2.0 三层布局中的**稳定层**：只记跨分支成立的慢变事实。执行状态见
 `.handoff/` 下与当前分支对应的现场文件；并行线看板在 common dir 的 `sync/lines/`。
@@ -16,10 +16,9 @@
 - 发布渠道：GitHub 仓库即 marketplace。Claude Code 用 `/plugin marketplace add
   hangwenlei/My-Skills` 后 `/plugin install <name>@my-skills`；Codex 用
   `codex plugin marketplace add hangwenlei/My-Skills` 后 `codex plugin add <name>@my-skills`。
-- 本机 Claude Code：`sync@my-skills` 已升级到 2.0.0（user scope，enabled），
-  需重启 Claude Code 才加载新版；`chinese@my-skills` 1.1.0。
-- 本机 Codex：`sync` 仍为 1.2.0，待 `codex plugin marketplace upgrade my-skills` 后
-  `codex plugin add sync@my-skills`；升级后需新开任务。
+- 本机 Claude Code：`sync@my-skills` 2.0.1（user scope，enabled），重启后加载；
+  `chinese@my-skills` 1.1.0。
+- 本机 Codex：`sync@my-skills` 2.0.1（installed, enabled），新开任务后加载。
 - 无部署服务、无端口、无外部依赖。
 
 ## 🔑 配置项清单
@@ -40,7 +39,7 @@
 - `tests/gc-scenarios.ps1`：设计依赖的 git 行为事实、两个算法参考实现、以及在
   真实仓库上验证淘汰判据裁决的场景测试。
 - `docs/superpowers/specs/2026-09-01-sync-v2-layered-handoff-design.md`：sync 2.0
-  设计与全部实测事实（T1–T14）、已知限制。
+  设计与全部实测事实（T1–T15）、已知限制。
 - `docs/superpowers/specs/2026-07-23-claude-codex-dual-compat-design.md`：双平台
   兼容设计与安全契约。
 
@@ -55,6 +54,9 @@
   看板每线一文件放 common dir，因单文件并发写实测会丢数据。
 - 孤儿回收以「分支是否还存在」（`git branch -a`）为主判据、`--merged` 为次、时间
   判据兜底：单靠 `--merged` 在 squash merge 与 delete-on-merge 下全部失效。
+- 主干自身的现场文件只受 tier 1 约束，豁免 tier 2、tier 3 与 L2 休眠删除：任何分支
+  都平凡地「已合并进它自己」（T15），且主干是干线不是功能线，长期无提交不构成回收
+  理由。看板条目不豁免——不进 Git、每次重写、无长期价值。
 - 休眠删除必须双条件（进入休眠超 30 天且分支仍无活动）并有退出休眠规则，否则
   重新活跃的分支会在第 30 天被误删。
 - `sync` 默认只读安全元数据；raw diff 或测试输出必须在同一本地调用内脱敏后才返回，
@@ -71,10 +73,12 @@
   禁止心算；macOS 无 `sha1sum`。
 - 取当前分支名用 `git branch --show-current`，输出为空即游离 HEAD；不用
   `rev-parse --abbrev-ref HEAD`（游离时输出字面量 `HEAD`）。
-- 2.0.1 待修：tier 2 传给 `git branch -a --merged <主干>` 的主干名无解析规则，
-  本地无同名 `main` 时 exit 128 静默失效（安全侧，不删）。见设计 §10 第 6 条。
+- 2.0.0 的 tier 2 有两处缺陷，均于 2.0.1 修复：对主干自身恒为已合并（会每次删掉主干
+  现场文件，T15）；主干名不可解析为本地修订时 exit 128 静默失效（现按 `<主干修订>`
+  解析，两形式都不解析则跳过 tier 2 并报告）。
 - 现有测试只证明「文本没退化」，skill 本身从未被测试驱动执行过；场景测试验证的
-  是判据的 PowerShell 重写在真实仓库上的裁决。
+  是判据的 PowerShell 重写在真实仓库上的裁决。T15 正是在有内容的 `.handoff/` 上
+  首次真实运行才暴露，迁移那次目录为空，判据一条都没被真正问到。
 - `.claude/worktrees/dazzling-hodgkin-9b4121` 是陈旧的 worktree 注册（目录已不存在，
   git 标记 prunable），属宿主管理。
 
