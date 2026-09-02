@@ -1,105 +1,91 @@
+<!-- sync:docs schema=2 -->
 # 开发现场交接（HANDOFF）
-
-> 更新时间：2026-07-24
 
 ## 概览
 
-`My-Skills` 是同时面向 Claude Code 与 Codex 发布的个人技能市场，仓库地址为
-`https://github.com/hangwenlei/My-Skills`。双平台入口、共享 skill 核心、
-静态验证、远端发布、本机 Codex 升级及新进程运行时 smoke 均已完成。
+`My-Skills` 是同时面向 Claude Code 与 Codex 发布的个人技能市场，仓库
+`https://github.com/hangwenlei/My-Skills`，含 `chinese`（1.1.0）与 `sync`（2.0.0）
+两个插件。`sync` 2.0 于 2026-09-01 完成分层交接改造并 fast-forward 合并到 `main`，
+`main` 与 `origin/main` 同为 `3bdfa37`。
 
-已发布并在本机验证的版本：
+本文件为 2.0 三层布局中的**稳定层**：只记跨分支成立的慢变事实。执行状态见
+`.handoff/` 下与当前分支对应的现场文件；并行线看板在 common dir 的 `sync/lines/`。
 
-- `chinese`：`1.1.0`
-- `sync`：`1.2.0`
+## 🚀 运行现状
 
-本轮功能发布提交为
-`68c6d0e23ef7aad2f32710133a2af2a284e07ce5`。
+- 发布渠道：GitHub 仓库即 marketplace。Claude Code 用 `/plugin marketplace add
+  hangwenlei/My-Skills` 后 `/plugin install <name>@my-skills`；Codex 用
+  `codex plugin marketplace add hangwenlei/My-Skills` 后 `codex plugin add <name>@my-skills`。
+- 本机 Claude Code：`sync@my-skills` 已升级到 2.0.0（user scope，enabled），
+  需重启 Claude Code 才加载新版；`chinese@my-skills` 1.1.0。
+- 本机 Codex：`sync` 仍为 1.2.0，待 `codex plugin marketplace upgrade my-skills` 后
+  `codex plugin add sync@my-skills`；升级后需新开任务。
+- 无部署服务、无端口、无外部依赖。
 
-## 已完成
+## 🔑 配置项清单
 
-- 同一 Git 仓库已同时发布 Claude 与 Codex marketplace，功能提交已
-  fast-forward 推送到 `origin/main`，未使用 force push。
-- 本机 `my-skills` Codex marketplace 已刷新到已发布 revision。
-- 本机 `chinese@my-skills` `1.1.0` 与 `sync@my-skills` `1.2.0` 均为
-  installed、enabled，source 分别指向各自的 `plugins\chinese\codex` 与
-  `plugins\sync\codex`。
-- native marketplace catalog、安装 receipt、插件 cache manifest 与共享
-  skill 内容均已做程序化断言。
-- 在两个互相隔离的临时 Git 仓库中，分别连续两次运行新的
-  `codex exec --ephemeral --sandbox workspace-write` 进程：
-  - `$chinese:init` 两次均 exit `0`；只生成 Codex 侧 `AGENTS.md`，中文哨兵
-    唯一，重复调用未产生重复区块，也未生成 `.claude` 或 `CLAUDE.md`。
-  - `$sync:docs` 两次均 exit `0`；生成 `HANDOFF.md` 与只含唯一续接哨兵的
-    `AGENTS.md`，重复调用保持续接区块幂等，也未生成 `CLAUDE.md`。
-- smoke 产物通过严格 UTF-8、文件集合、哨兵顺序和宿主隔离断言后，临时目录
-  已在系统 Temp 路径及全树无 reparse point 校验后清理。
+本项目不需要任何环境变量、密钥或外部服务凭据。
 
-## 进行中
+## 📁 重要文件
 
-- 无 Codex 发布或运行时验证事项。
-- 本机未安装 Claude CLI，因此 Claude runtime smoke 未执行；Claude 兼容性
-  目前只有仓库静态校验和发布包结构证据，不能表述为本机实测通过。
-
-## 下一步
-
-1. 日常使用时新开 Codex 任务，再调用 `$chinese:init` 或 `$sync:docs`；
-   已打开的旧任务不会热加载刚升级的 skill。
-2. 若需要完成 Claude 实机验证，先安装 Claude CLI，再升级 marketplace 与插件，
-   分别用 `/chinese:init`、`/sync:docs` 在隔离测试项目中执行 runtime smoke。
-
-## 当前验证
-
-发布前静态验证：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\validate-plugin.ps1 -Section docs
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\validate-plugin.ps1 -Section all
-git diff --check
-```
-
-三项均 exit `0`；两组插件校验均输出“全部通过”。
-
-本机 Codex 安装与运行时验证：
-
-```powershell
-codex plugin marketplace upgrade my-skills --json
-codex plugin add chinese@my-skills --json
-codex plugin add sync@my-skills --json
-codex plugin list --json
-codex exec --ephemeral --sandbox workspace-write --cd <isolated-repo> '$chinese:init'
-codex exec --ephemeral --sandbox workspace-write --cd <isolated-repo> '$sync:docs'
-```
-
-marketplace upgrade 无错误，两个插件版本、启用状态、native source、receipt 与
-cache 内容断言均通过；两个 skill 各使用全新进程连续运行两次，四次均 exit `0`。
-
-## 风险与注意事项
-
-- 当前已打开的 Codex 任务不会热加载新版插件；必须新开任务使用已升级版本。
-- Claude CLI 未安装且 Claude runtime smoke 未执行，不得把静态双平台兼容描述
-  为 Claude 本机运行时验证通过。
-- `tests/validate-plugin.ps1` 必须保持 UTF-8 with BOM，以兼容 Windows
-  PowerShell 5.1 的中文解析。
-- `sync` 的跨文档更新仍是 propose-confirm，不自动提交，也不应改写日志型或
-  时间线型文档。
-
-## 重要文件
-
-- `.claude-plugin/marketplace.json`：Claude marketplace。
-- `.agents/plugins/marketplace.json`：Codex native marketplace。
+- `.claude-plugin/marketplace.json`：Claude marketplace 清单。
+- `.agents/plugins/marketplace.json`：Codex native marketplace 清单。
 - `plugins/chinese/`：chinese 的 Claude 薄入口、Codex manifest 与共享核心。
-- `plugins/sync/`：sync 的 Claude 薄入口、Codex manifest 与共享核心。
-- `.claude/settings.json`、`CLAUDE.md`、`AGENTS.md`：本仓库双宿主指令。
-- `tests/validate-plugin.ps1`：全量静态验证脚本。
+- `plugins/sync/`：sync 的 Claude 薄入口、Codex manifest 与共享核心
+  （`codex/skills/docs/SKILL.md` 为 2.0 全部业务指令）。
+- `README.md`：双平台安装、调用、升级、sync 2.0 三层说明与 1.x 迁移指引。
+- `AGENTS.md`：Codex 中文输出与续接规则。
+- `CLAUDE.md`、`.claude/settings.json`：Claude Code 中文输出与续接配置。
+- `tests/validate-plugin.ps1`：结构、文本契约、安全闸门与版本的静态验证。
+- `tests/gc-scenarios.ps1`：设计依赖的 git 行为事实、两个算法参考实现、以及在
+  真实仓库上验证淘汰判据裁决的场景测试。
+- `docs/superpowers/specs/2026-09-01-sync-v2-layered-handoff-design.md`：sync 2.0
+  设计与全部实测事实（T1–T14）、已知限制。
+- `docs/superpowers/specs/2026-07-23-claude-codex-dual-compat-design.md`：双平台
+  兼容设计与安全契约。
 
-## 常用命令
+## 🧠 长期决策与理由
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\validate-plugin.ps1 -Section docs
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\validate-plugin.ps1 -Section all
-codex plugin marketplace upgrade my-skills --json
-codex plugin list --json
-git status --short
-git diff --check
-```
+- Claude 与 Codex 共用一个 Git 仓库但各自保留原生 marketplace 清单，不把一个平台
+  的安装约定伪装成另一个平台的格式。
+- 薄入口只声明宿主并读取共享核心，避免双份实现漂移；Codex 第三方 skill 用
+  `$name:skill` 或 `/skills`，不虚构同名 slash alias。
+- `sync` 2.0 把单文件交接拆为稳定层 / 分支现场 / 协同看板三层：分支现场文件名携带
+  分支哈希使并行分支互不冲突；稳定层不设全局时间戳，新鲜度交给 `git blame`；
+  看板每线一文件放 common dir，因单文件并发写实测会丢数据。
+- 孤儿回收以「分支是否还存在」（`git branch -a`）为主判据、`--merged` 为次、时间
+  判据兜底：单靠 `--merged` 在 squash merge 与 delete-on-merge 下全部失效。
+- 休眠删除必须双条件（进入休眠超 30 天且分支仍无活动）并有退出休眠规则，否则
+  重新活跃的分支会在第 30 天被误删。
+- `sync` 默认只读安全元数据；raw diff 或测试输出必须在同一本地调用内脱敏后才返回，
+  过滤失败时不回显原始内容。
+- `sync` 不执行 `git commit`，也不读写 Claude 的 auto memory 目录。
+
+## ⚠️ 注意事项 / 坑
+
+- `tests/*.ps1` 必须是 UTF-8 with BOM；`SKILL.md` 以 YAML frontmatter 开头，
+  **绝不能加 BOM**。补 BOM 只能用 ReadAllBytes → TrimStart(U+FEFF) → WriteAllText
+  的方式，不能 `Get-Content -Raw`（会按代码页 936 解码毁掉中文）。
+- 主干探测禁用 `git config init.defaultBranch`（实测其值与真实主干不符）。
+- 分支现场文件名的哈希必须用命令算（`sha1sum` / `shasum` / PowerShell SHA1），
+  禁止心算；macOS 无 `sha1sum`。
+- 取当前分支名用 `git branch --show-current`，输出为空即游离 HEAD；不用
+  `rev-parse --abbrev-ref HEAD`（游离时输出字面量 `HEAD`）。
+- 2.0.1 待修：tier 2 传给 `git branch -a --merged <主干>` 的主干名无解析规则，
+  本地无同名 `main` 时 exit 128 静默失效（安全侧，不删）。见设计 §10 第 6 条。
+- 现有测试只证明「文本没退化」，skill 本身从未被测试驱动执行过；场景测试验证的
+  是判据的 PowerShell 重写在真实仓库上的裁决。
+- `.claude/worktrees/dazzling-hodgkin-9b4121` 是陈旧的 worktree 注册（目录已不存在，
+  git 标记 prunable），属宿主管理。
+
+## ▶️ 常用命令
+
+- `powershell -NoProfile -ExecutionPolicy Bypass -File tests/validate-plugin.ps1`：
+  全量静态验证（`-Section sync|docs|chinese|distribution` 可分节）。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File tests/gc-scenarios.ps1`：
+  git 行为契约与场景测试（`-Section env|algo|scenario`）。
+- `claude plugin marketplace update my-skills` 后 `claude plugin update sync@my-skills`：
+  升级本机 Claude 插件。
+- `codex plugin marketplace upgrade my-skills` 后 `codex plugin add sync@my-skills`：
+  升级本机 Codex 插件。
+- `git status --short`、`git diff --check`：检查工作树与补丁格式。
