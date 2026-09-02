@@ -79,8 +79,6 @@
 - 现有测试只证明「文本没退化」，skill 本身从未被测试驱动执行过；场景测试验证的
   是判据的 PowerShell 重写在真实仓库上的裁决。T15 正是在有内容的 `.handoff/` 上
   首次真实运行才暴露，迁移那次目录为空，判据一条都没被真正问到。
-- `.claude/worktrees/dazzling-hodgkin-9b4121` 是陈旧的 worktree 注册（目录已不存在，
-  git 标记 prunable），属宿主管理。
 
 ## ▶️ 常用命令
 
