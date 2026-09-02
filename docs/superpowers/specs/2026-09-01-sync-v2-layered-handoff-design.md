@@ -54,6 +54,9 @@
 | T9 | 空目录不进 Git，新建 worktree 中 `.handoff/` 不存在 | 写入前必须 `mkdir -p` |
 | T10 | **squash merge 后** `git branch --merged` **不报告**该分支，但其现场文件已进入主干 | 孤儿判据不能只依赖 `--merged` |
 | T11 | **分支删除后** `git branch --merged` 不再列出它，孤儿文件仍留在主干 | 需以「分支是否存在」为主判据 |
+| T12 | 远端删除分支后，`origin/<name>` 在普通 `git fetch` 后**仍留在** `git branch -a` 中，只有 `fetch --prune` 才清理 | tier 1 不能只信 `-a` 的输出；tier 2、tier 3 必须能处理远端限定名 |
+| T13 | 裸分支名对只有 `refs/remotes/` 引用的分支**不解析**，`git log -1 <name>` 退出 128 `fatal: ambiguous argument` | 时间判据须回退到 `<remote>/<name>`，均不解析时 no-op，失败绝不读作「无活动」 |
+| T14 | detached HEAD 时 `git branch --show-current` 输出**空串但 exit 0**；`git rev-parse --abbrev-ref HEAD` 输出字面量 `HEAD` | 取分支名只用前者，以输出是否为空判定 detached，禁用后者 |
 
 T5、T6、T7、T8 均推翻了朴素实现，是本设计存在的直接原因。
 
@@ -107,11 +110,24 @@ Read 工具直接读文件时注释仍可见，判据不受影响。
 
 承载易失的执行状态，只由所属分支写入。
 
+- 当前分支名用 `git branch --show-current` 取得（依据 T14）。输出为空即 detached HEAD：
+  此时没有分支身份，**只写稳定层**，跳过分支现场与看板条目并报告。不要从 commit SHA
+  造文件名——detached 是瞬态，会留下「分支」从不存在、永远无法回收的文件
+- **哈希必须用命令算，禁止心算**。语言模型无法可靠计算 SHA-1，心算结果跨次不一致，
+  每次运行都会生成新文件名。POSIX 用 `printf '%s' '<分支名>' | sha1sum | cut -c1-6`
+  （macOS 默认无 `sha1sum`，用 `shasum`）；PowerShell 用 `[System.Text.Encoding]::UTF8.GetBytes`
+  显式取 UTF-8 字节再 SHA-1，且必须作为命令串传入而非写进无 BOM 的 `.ps1`。用已验证
+  向量自检所选命令：`feat/auth`→`3a9c55`、`feat-auth`→`f42474`、`功能/登录`→`9ff12b`
 - `slug`：分支名将 `/ \ : * ? " < > |` 替换为 `-`
 - `hash`：**完整分支名的 UTF-8 字节**做 SHA-1，取前 6 位十六进制，解决 T7 的碰撞。
   必须显式指定 UTF-8，不得依赖平台默认编码，否则含中文的分支名在 Windows
   PowerShell 与 git bash 下会算出不同哈希
-- frontmatter 记录完整分支名与 worktree 路径，读取时校验一致性
+- frontmatter 记录完整分支名与 worktree 路径。**两者校验强度不同**：完整分支名是
+  硬一致性校验——与文件名反推不符即意味着哈希碰撞或手工改名，停止写入该文件并报告；
+  worktree 路径只是信息字段——`.handoff/` 进 Git 而路径是本机事实，同事 clone 到
+  不同路径、`git worktree move`、换机器都会使其失配，若把它也当硬校验，除作者本人外
+  每个协作者的每次调用都会因「路径不一致」空转。失配时静默改写为当前路径并在报告中
+  提一句
 
 节结构：
 
@@ -155,8 +171,8 @@ Read 工具直接读文件时注释仍可见，判据不受影响。
 |---|---|---|
 | 看板条目 | 分支已不在 `git branch --format` 输出中 | 删除该条目文件 |
 | 看板条目 | 分支仍在，但其 worktree 已不在 `git worktree list --porcelain` 中 | **不删**，标注「无活跃 worktree」后转入 L2 时间判据 |
-| 分支现场 | 文件 frontmatter 记录的分支**已不在** `git branch --format` 输出中（依据 T10） | 决策提炼后删除，见 5.4 |
-| 分支现场 | 分支仍在，且**已合并进主干**（`git branch --merged`，依据 T4、T6） | 决策提炼后删除，见 5.4 |
+| 分支现场 | 文件 frontmatter 记录的分支**已不在** `git branch -a --format='%(refname:short)'` 输出中，裸名与 `<remote>/<名>` 任一命中即视为存在（依据 T10、T12） | 决策提炼后删除，见 5.4 |
+| 分支现场 | 分支仍在，且**已合并进主干**（`git branch -a --merged <主干>`，依据 T4、T6、T12） | 决策提炼后删除，见 5.4 |
 | 分支现场 | 分支仍在、未合并，但其 `git log -1` 超过 14 天（依据 T11） | 转入 L2 休眠流程，不直接删除 |
 
 **分支现场为什么需要三条判据。** 单靠 `git branch --merged` 有两个实测确认的盲区
@@ -174,6 +190,15 @@ Read 工具直接读文件时注释仍可见，判据不受影响。
 
 判定所依据的分支名取自现场文件 frontmatter 中记录的**完整分支名**，不从文件名反推
 ——文件名经过 slug 化和哈希，不可逆。
+
+**远端追踪引用会陈旧，所以三级判据都必须能处理远端限定名（T12、T13）。** 分支在远端
+删除后，`origin/<name>` 在普通 `git fetch` 后仍留在 `git branch -a` 里，只有
+`fetch --prune` 才清理。若 tier 1 只信 `-a` 的输出而 tier 2、tier 3 又只处理裸名，
+则「推送 → 合并 → 远端删除」这条 GitHub 默认流程会让三级全部落空，`.handoff/` 回到
+无限累积。因此 tier 2 用 `git branch -a --merged`；凡以分支名作 revision 参数的判据
+（tier 3 与全部 L2 时间判据），解析顺序为：裸名 → `<remote>/<分支名>` → 均不解析则
+该判据**不满足**（no-op）。查找失败绝不能读作「无近期活动」，否则一次命令错误就会把
+文件送上删除路径。
 | 稳定层条目 | 引用的文件路径已不存在 | 就地标注 `⚠️ 路径已失效` |
 | 常用命令 | 对应脚本 / make target 已不存在 | 就地标注 `⚠️ 命令已失效` |
 
@@ -246,7 +271,9 @@ Read 工具直接读文件时注释仍可见，判据不受影响。
 1. `git symbolic-ref --quiet refs/remotes/origin/HEAD`
 2. `origin/main` 或 `origin/master` 的存在性
 3. 本地 `main` 或 `master` 的存在性
-4. 均不可得 → **跳过全部 merged 判据**，仅使用时间判据，并在报告中说明
+4. 均不可得 → **跳过 merged 判据（tier 2）**，保留分支存在性判据与时间判据，并在
+   报告中说明。只有 merged 判据需要主干；若连分支存在性判据一并跳过，孤儿回收
+   整体失效
 
 ## 6. 执行流程
 
