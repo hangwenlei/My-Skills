@@ -122,7 +122,7 @@ if (Should-Run 'distribution') {
 
   foreach ($plugin in @(
     @{ Name = 'chinese'; Version = '1.1.0' },
-    @{ Name = 'sync'; Version = '2.0.0' }
+    @{ Name = 'sync'; Version = '2.0.1' }
   )) {
     $name = $plugin.Name
     $claudeManifestPath = Join-Path $root "plugins\$name\.claude-plugin\plugin.json"
@@ -218,8 +218,8 @@ if (Should-Run 'sync') {
       (Test-Path -LiteralPath $codexManifestPath)) {
     $claudeManifest = Read-JsonUtf8 $claudeManifestPath
     $codexManifest = Read-JsonUtf8 $codexManifestPath
-    Check ($claudeManifest.version -eq '2.0.0') 'sync Claude 清单版本为 2.0.0'
-    Check ($codexManifest.version -eq '2.0.0') 'sync Codex 清单版本为 2.0.0'
+    Check ($claudeManifest.version -eq '2.0.1') 'sync Claude 清单版本为 2.0.1'
+    Check ($codexManifest.version -eq '2.0.1') 'sync Codex 清单版本为 2.0.1'
     Check ($claudeManifest.version -eq $codexManifest.version) `
       'sync 双平台清单版本一致'
   }
@@ -340,6 +340,14 @@ if (Should-Run 'sync') {
       'sync 2.0 说明远端追踪引用需 prune 才消失'
     Check ($content -match 'git rev-parse --verify --quiet') `
       'sync 2.0 用 rev-parse 判定分支修订是否可解析'
+    # 2.0.1：任何分支都平凡地「已合并进它自己」，`branch -a --merged <主干>` 的输出
+    # 必然含主干本身，tier 2 会在每次运行时判主干自己的现场文件为删除
+    Check ($markup.Contains('主干自身的现场文件豁免tier2、tier3与全部L2')) `
+      'sync 2.0.1 主干自身的现场文件豁免 tier 2、tier 3 与 L2'
+    # 2.0.1：探测链第 1/2 级从远端返回裸主干名，本地无同名分支时
+    # `branch -a --merged main` 以 exit 128 静默失效，tier 2 从此不再触发
+    Check ($markup.Contains('<主干修订>的解析顺序')) `
+      'sync 2.0.1 定义 <主干修订> 的解析顺序'
     Check ($markup.Contains('该条时间判据视为未命中，本轮对该文件不做任何动作')) `
       'sync 2.0 修订解析失败时时间判据不动作'
     Check ($markup.Contains('|shasum|cut-c1-6')) `

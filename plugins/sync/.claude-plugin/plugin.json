@@ -1,6 +1,6 @@
 {
   "name": "sync",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "分层固化开发现场并安全刷新相关文档，支持多 worktree 并行",
   "author": {
     "name": "hangwenlei"

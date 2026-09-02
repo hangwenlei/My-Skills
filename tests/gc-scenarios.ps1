@@ -216,15 +216,56 @@ function Test-BranchPresent {
   return (@(Get-BranchPresentMatch -Repo $Repo -BranchName $BranchName -LocalOnly:$LocalOnly).Count -gt 0)
 }
 
+function Resolve-MainRevision {
+  param([string]$Repo, [string]$MainBranch, [switch]$BareOnly)
+  # SKILL.md 的 `<主干修订>`，与 `<分支修订>` 同形。主干探测链的第 1、2 级是从远端
+  # 得出结论的，返回的是裸名（如 main）。本地若没有同名分支（本地 master、远端 main），
+  # 把裸名直接传给 `git branch -a --merged main` 会以 exit 128 +
+  # `fatal: malformed object name main` 失败，tier 2 于是静默失效——失败方向是「不删」，
+  # 安全，但也正因为安全才最容易被忽略。因此：裸名 → <remote>/<主干名> → 均不解析
+  # 则返回 $null，调用方据此跳过 tier 2 并报告。
+  # -BareOnly 复现修复前只认裸名的形态，供鉴别力断言使用。
+  if ([string]::IsNullOrWhiteSpace($MainBranch)) { return $null }
+  $ordered = @($MainBranch)
+  if (-not $BareOnly) {
+    foreach ($remote in @(& git -C $Repo remote)) {
+      if (-not [string]::IsNullOrWhiteSpace($remote)) {
+        $ordered += ('{0}/{1}' -f $remote.Trim(), $MainBranch)
+      }
+    }
+  }
+  foreach ($candidate in $ordered) {
+    & git -C $Repo rev-parse --verify --quiet $candidate | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $candidate }
+  }
+  return $null
+}
+
 function Test-BranchMerged {
-  param([string]$Repo, [string]$BranchName, [string]$MainBranch, [switch]$LocalOnly)
-  # tier 2：是否已合并进主干，判定用 `git branch -a --merged <主干>`。
+  param(
+    [string]$Repo,
+    [string]$BranchName,
+    [string]$MainBranch,
+    [switch]$LocalOnly,
+    [switch]$BareMain
+  )
+  # tier 2：是否已合并进主干，判定用 `git branch -a --merged <主干修订>`。
   # 主干不可探测时本判据跳过（SKILL.md：只有 merged 判据需要主干，
   # 另外两条不需要，不得因主干探测失败连带停掉整个孤儿回收）。
+  # 主干名同样要先解析成修订，理由见 Resolve-MainRevision。
+  # -BareMain 复现修复前把裸主干名直接交给 git 的形态：git 以 exit 128 失败、
+  # 输出为空，判据于是静默给出 $false，供鉴别力断言使用。
   if ([string]::IsNullOrWhiteSpace($MainBranch)) { return $false }
+  if ($BareMain) {
+    $mainRevision = $MainBranch
+  } else {
+    $mainRevision = Resolve-MainRevision -Repo $Repo -MainBranch $MainBranch
+    # $null 表示两种形式都解析不到：跳过 tier 2 并报告，不读作「未合并」后沉默
+    if ($null -eq $mainRevision) { return $false }
+  }
   $branchArgs = @('branch')
   if (-not $LocalOnly) { $branchArgs += '-a' }
-  $branchArgs += @('--merged', $MainBranch, '--format=%(refname:short)')
+  $branchArgs += @('--merged', $mainRevision, '--format=%(refname:short)')
   $listed = @(@(& git -C $Repo @branchArgs) | ForEach-Object { $_.Trim() })
   $candidates = Get-BranchNameCandidate -Repo $Repo -BranchName $BranchName
   return (@($candidates | Where-Object { $listed -contains $_ }).Count -gt 0)
@@ -272,24 +313,41 @@ function Get-HandoffVerdict {
     [string]$BranchName,
     [string]$MainBranch,
     [int]$IdleDay = 14,
-    [ValidateSet('current', 'legacy-local', 'legacy-wide-tier1')]
+    [ValidateSet('current', 'legacy-local', 'legacy-wide-tier1',
+                 'legacy-no-main-exempt', 'legacy-bare-main')]
     [string]$Mode = 'current'
   )
   # 对一个 .handoff/ 现场文件依次跑 L1 的三条判据，产出本轮裁决：
   #   COLLECT  提炼决策后删除（tier 1 或 tier 2 命中）
   #   DORMANT  转入 L2 休眠流程（tier 3 命中）
-  #   KEEP     本轮不动它（含 tier 3 因修订解析不到而不动作）
-  # Mode 复现两个历史形态，让每条场景断言都能自证有鉴别力：
-  #   legacy-local       三条判据全是本地视角 —— 第一次事故：新 clone 全量误删
-  #   legacy-wide-tier1  只把 tier 1 放宽到 -a —— 第二次事故：孤儿回收成死规则
+  #   KEEP     本轮不动它（含 tier 3 因修订解析不到而不动作、以及主干豁免）
+  # Mode 复现四个历史形态，让每条场景断言都能自证有鉴别力：
+  #   legacy-local           三条判据全是本地视角 —— 第一次事故：新 clone 全量误删
+  #   legacy-wide-tier1      只把 tier 1 放宽到 -a —— 第二次事故：孤儿回收成死规则
+  #   legacy-no-main-exempt  无主干豁免 —— 2.0.0 缺陷 A：主干自己的现场文件每次被删
+  #   legacy-bare-main       裸主干名直接当修订 —— 2.0.0 缺陷 B：tier 2 exit 128 静默失效
   $localTier1 = ($Mode -eq 'legacy-local')
-  $localTier2 = ($Mode -ne 'current')
-  $bareTier3 = ($Mode -ne 'current')
+  $localTier2 = ($Mode -in @('legacy-local', 'legacy-wide-tier1'))
+  $bareTier3 = ($Mode -in @('legacy-local', 'legacy-wide-tier1'))
+  $bareMain = ($Mode -eq 'legacy-bare-main')
+  $exemptMain = ($Mode -ne 'legacy-no-main-exempt')
+
+  # 主干自身的现场文件只受 tier 1 约束。两条理由（SKILL.md「主干自身的现场文件
+  # 豁免 tier 2、tier 3 与全部 L2」）：任何分支都平凡地「已合并进它自己」，
+  # `branch -a --merged <主干修订>` 的输出必然含主干本身，tier 2 每次运行都命中；
+  # 且主干是干线不是功能线，长期无提交不构成回收理由。站在主干上时 tier 1 平凡
+  # 成立，因此这里直接给 KEEP。豁免只针对主干这一份，其它分支照旧走完三条判据。
+  if ($exemptMain -and
+      -not [string]::IsNullOrWhiteSpace($MainBranch) -and
+      $BranchName -eq $MainBranch) {
+    return 'KEEP'
+  }
 
   if (-not (Test-BranchPresent -Repo $Repo -BranchName $BranchName -LocalOnly:$localTier1)) {
     return 'COLLECT'
   }
-  if (Test-BranchMerged -Repo $Repo -BranchName $BranchName -MainBranch $MainBranch -LocalOnly:$localTier2) {
+  if (Test-BranchMerged -Repo $Repo -BranchName $BranchName -MainBranch $MainBranch `
+        -LocalOnly:$localTier2 -BareMain:$bareMain) {
     return 'COLLECT'
   }
   if ((Get-BranchIdleState -Repo $Repo -BranchName $BranchName -IdleDay $IdleDay -BareOnly:$bareTier3) -eq 'IDLE') {
@@ -317,6 +375,9 @@ function Initialize-ScenarioRepo {
   & git -C $Path symbolic-ref HEAD refs/heads/main | Out-Null
   & git -C $Path config user.email 'test@example.com' | Out-Null
   & git -C $Path config user.name 'sync-test' | Out-Null
+  # 场景仓库对开发者的全局 git 配置保持隔离：否则 core.autocrlf=true 会让
+  # `git add` 对本节写出的 LF 文件打印换行归一警告，绿灯里混进看似失败的噪音。
+  & git -C $Path config core.autocrlf false | Out-Null
 }
 
 function Add-ScenarioCommit {
@@ -365,6 +426,7 @@ function New-ScenarioClone {
   & git clone -q $Scenario.Origin $clone | Out-Null
   & git -C $clone config user.email 'test@example.com' | Out-Null
   & git -C $clone config user.name 'sync-test' | Out-Null
+  & git -C $clone config core.autocrlf false | Out-Null
   return $clone
 }
 
@@ -550,11 +612,14 @@ if (Should-Run 'scenario') {
   # 本节测的是什么、**不是**什么——先说清楚，免得后来人把绿灯读错。
   #
   # 【测的是】把 SKILL.md「信息淘汰」小节的判据用 PowerShell 重写一份（上面那组
-  #   Test-BranchPresent / Test-BranchMerged / Resolve-BranchRevision /
-  #   Get-BranchIdleState / Get-HandoffVerdict），在真实建出来的 git 仓库上跑，
-  #   核对它在四类真实处境下给出的裁决。已经逃逸过两次的缺陷都属于这一类：
-  #   新 clone 把同事的现场文件全判成孤儿、以及「推送 → 合并 → 删远端分支」
-  #   之后三条判据同时落空。文本匹配断言看不见它们，只有把仓库真的建出来才会暴露。
+  #   Test-BranchPresent / Test-BranchMerged / Resolve-MainRevision /
+  #   Resolve-BranchRevision / Get-BranchIdleState / Get-HandoffVerdict），在真实
+  #   建出来的 git 仓库上跑，核对它在六类真实处境下给出的裁决。已经逃逸过四次的
+  #   缺陷都属于这一类：新 clone 把同事的现场文件全判成孤儿；「推送 → 合并 →
+  #   删远端分支」之后三条判据同时落空；tier 2 把主干自己的现场文件判成删除；
+  #   本地无同名主干分支时 tier 2 以 exit 128 静默失效。后两条是 2.0.0 发布后
+  #   第一次在有内容的 `.handoff/` 上真实运行才暴露的——迁移那次目录还是空的，
+  #   判据一条都没被真正问到。文本匹配断言看不见它们，只有把仓库真的建出来才会暴露。
   #
   # 【不测的是】skill 本身没有被执行，一次也没有。SKILL.md 的实现是自然语言指令，
   #   由 AI 在运行时阅读，并据此对用户的真实仓库执行创建、重写和**删除**。测试
@@ -755,6 +820,148 @@ if (Should-Run 'scenario') {
       'S4 对照：回到 main 后 show-current 返回真实分支名，空串确由游离 HEAD 造成'
   } finally {
     Remove-ScenarioTree $detachedRoot
+  }
+
+  # --- 场景 5：主干自身的现场文件不被删除 ---
+  # 仓库停在 main，`.handoff/` 里有一份 frontmatter 记 `branch: main` 的现场文件——
+  # 1.x → 2.0 迁移正是在主干上刻意创建它的。`git branch -a --merged main` 的输出
+  # 第一项就是 main 自己（下面的 T15 断言），因此无豁免的 tier 2 对它**每次运行
+  # 都命中**，裁决 COLLECT：一份刚建出来的现场文件在下一次调用就被提炼后删除。
+  # 正确裁决是 KEEP。2.0.0 的迁移那次没暴露它，只因为当时 `.handoff/` 还是空的。
+  $mainSelfScenario = $null
+  try {
+    $mainSelfScenario = New-OriginScenario -Tag 'mainself'
+    $mainSelfClone = New-ScenarioClone -Scenario $mainSelfScenario
+    $mainSelfMain = Resolve-MainBranch -Repo $mainSelfClone
+    Check ($mainSelfMain -eq 'main') `
+      'S5 clone 中主干经 origin/HEAD 探测为 main'
+
+    $mainSelfRevision = Resolve-MainRevision -Repo $mainSelfClone -MainBranch $mainSelfMain
+    Check ($mainSelfRevision -eq 'main') `
+      'S5 本地存在同名分支时 <主干修订> 第 1 顺位就是裸主干名'
+    $mainSelfMerged = @(@(& git -C $mainSelfClone branch -a --merged $mainSelfRevision `
+      --format='%(refname:short)') | ForEach-Object { $_.Trim() })
+    Check ($mainSelfMerged -contains 'main') `
+      'S5 T15：git branch -a --merged <X> 的输出包含 X 自身'
+
+    $mainSelfFile = Get-BranchFileName 'main'
+    $mainSelfPath = Add-ScenarioHandoff -Repo $mainSelfClone -BranchName 'main' `
+      -FileName $mainSelfFile
+    $mainSelfBranch = Get-HandoffBranchName -Path $mainSelfPath
+    Check ($mainSelfBranch -eq 'main') `
+      'S5 现场文件 frontmatter 记录的完整分支名即主干名'
+
+    Check (Test-BranchMerged -Repo $mainSelfClone -BranchName $mainSelfBranch `
+      -MainBranch $mainSelfMain) `
+      'S5 鉴别力：撇开豁免单看 tier 2，主干确实「已合并进主干」，判据命中'
+    Check ((Get-HandoffVerdict -Repo $mainSelfClone -BranchName $mainSelfBranch `
+      -MainBranch $mainSelfMain -Mode 'legacy-no-main-exempt') -eq 'COLLECT') `
+      'S5 鉴别力：修复前的判据把主干自己的现场文件判为删除'
+
+    Check ((Get-HandoffVerdict -Repo $mainSelfClone -BranchName $mainSelfBranch `
+      -MainBranch $mainSelfMain) -eq 'KEEP') `
+      'S5 现行判据给出 KEEP，主干自身的现场文件豁免 tier 2/3 与 L2'
+    Check (Test-Path -LiteralPath $mainSelfPath) `
+      'S5 场景结束时主干的现场文件仍在（KEEP 的实际含义）'
+
+    # 护栏：豁免只针对主干那一份。同一个仓库里一条已合并进主干的功能分支
+    # 必须照旧被 tier 2 命中，否则这次修复就把 tier 2 整条放宽掉了。
+    & git -C $mainSelfClone checkout -q -b 'feat/merged-into-main' main | Out-Null
+    Add-ScenarioCommit -Repo $mainSelfClone -FileName 'merged-into-main.md' `
+      -Message 'feature work'
+    & git -C $mainSelfClone checkout -q main | Out-Null
+    & git -C $mainSelfClone merge -q --no-ff 'feat/merged-into-main' `
+      -m 'merge feat/merged-into-main' | Out-Null
+    Check (Test-BranchMerged -Repo $mainSelfClone -BranchName 'feat/merged-into-main' `
+      -MainBranch $mainSelfMain) `
+      'S5 护栏：功能分支合并进主干后 tier 2 仍然命中'
+    Check ((Get-HandoffVerdict -Repo $mainSelfClone -BranchName 'feat/merged-into-main' `
+      -MainBranch $mainSelfMain) -eq 'COLLECT') `
+      'S5 护栏：主干豁免不外溢，已合并的功能分支照旧判为 COLLECT'
+  } finally {
+    Remove-ScenarioTree $mainSelfScenario.Root
+  }
+
+  # --- 场景 6：主干名不可解析为本地修订时 tier 2 仍须工作 ---
+  # 本地主干叫 master，远端叫 main：探测链第 2 级从 refs/remotes/origin/main 得出
+  # 裸名 `main`，而本地根本没有这个分支。把裸名直接传给
+  # `git branch -a --merged main` 会 exit 128 + fatal: malformed object name，
+  # 输出为空 —— tier 2 于是**静默**返回「未合并」，一条真正已合并的孤儿分支
+  # 永远回收不掉。正确行为：<主干修订> 退到 origin/main，tier 2 恢复工作。
+  # 注意：本场景运行时控制台会出现两行 `fatal: malformed object name main`，
+  # 那是下面两处 -BareMain 鉴别力断言**故意**触发的真实 git 报错，不是测试失败；
+  # 它正是这个缺陷的现场——判据看到的只有一个空 stdout，看不到这行 stderr。
+  $mainRevScenario = $null
+  try {
+    $mainRevRoot = New-ScenarioRoot -Tag 'mainrev'
+    $mainRevOrigin = Join-Path $mainRevRoot 'origin.git'
+    & git init -q --bare $mainRevOrigin | Out-Null
+    & git -C $mainRevOrigin symbolic-ref HEAD refs/heads/main | Out-Null
+    $mainRevRepo = Join-Path $mainRevRoot 'repo'
+    New-Item -ItemType Directory -Path $mainRevRepo -Force | Out-Null
+    & git init -q $mainRevRepo | Out-Null
+    # 本地主干叫 master，与远端的 main 不同名——这正是本场景的全部要害
+    & git -C $mainRevRepo symbolic-ref HEAD refs/heads/master | Out-Null
+    & git -C $mainRevRepo config user.email 'test@example.com' | Out-Null
+    & git -C $mainRevRepo config user.name 'sync-test' | Out-Null
+    & git -C $mainRevRepo config core.autocrlf false | Out-Null
+    Add-ScenarioCommit -Repo $mainRevRepo -FileName 'seed.md' -Message 'init'
+    & git -C $mainRevRepo checkout -q -b 'feat/merged-remote' | Out-Null
+    Add-ScenarioCommit -Repo $mainRevRepo -FileName 'remote-merged.md' -Message 'shipped work'
+    & git -C $mainRevRepo checkout -q master | Out-Null
+    & git -C $mainRevRepo merge -q --no-ff 'feat/merged-remote' `
+      -m 'merge feat/merged-remote' | Out-Null
+    & git -C $mainRevRepo remote add origin $mainRevOrigin | Out-Null
+    & git -C $mainRevRepo push -q origin 'master:refs/heads/main' | Out-Null
+    & git -C $mainRevRepo push -q origin 'feat/merged-remote:refs/heads/feat/merged-remote' | Out-Null
+    & git -C $mainRevRepo fetch -q origin | Out-Null
+    # 本地删掉功能分支，只留远端追踪引用：tier 1 仍判「分支还在」，判定会走到 tier 2
+    & git -C $mainRevRepo branch -D 'feat/merged-remote' | Out-Null
+    $mainRevScenario = [pscustomobject]@{ Root = $mainRevRoot; Repo = $mainRevRepo }
+
+    $mainRevMain = Resolve-MainBranch -Repo $mainRevRepo
+    Check ($mainRevMain -eq 'main') `
+      'S6 探测链第 2 级从 origin/main 得出裸主干名 main'
+    & git -C $mainRevRepo rev-parse --verify --quiet refs/heads/main | Out-Null
+    Check ($LASTEXITCODE -ne 0) `
+      'S6 本地并不存在名为 main 的分支，裸名无从解析'
+    Check (Test-BranchPresent -Repo $mainRevRepo -BranchName 'feat/merged-remote') `
+      'S6 tier 1 经 origin/feat/merged-remote 判定该分支仍在，判定会走到 tier 2'
+
+    $mainRevBare = Invoke-GitCapture -Repo $mainRevRepo `
+      -GitArgs @('branch', '-a', '--merged', 'main', '--format=%(refname:short)')
+    Check ($mainRevBare.Code -eq 128) `
+      'S6 鉴别力：裸主干名直接传给 branch -a --merged 以 exit 128 失败'
+    Check ($mainRevBare.Err -match 'malformed object name') `
+      'S6 鉴别力：失败信息正是设计 §10 第 6 条记录的 malformed object name'
+    Check ([string]::IsNullOrWhiteSpace($mainRevBare.Out)) `
+      'S6 鉴别力：失败时 stdout 为空，判据看不出这是错误还是「没合并」'
+    Check ($null -eq (Resolve-MainRevision -Repo $mainRevRepo -MainBranch $mainRevMain -BareOnly)) `
+      'S6 鉴别力：只认裸名的旧形态解析不到主干修订'
+    Check (-not (Test-BranchMerged -Repo $mainRevRepo -BranchName 'feat/merged-remote' `
+      -MainBranch $mainRevMain -BareMain)) `
+      'S6 鉴别力：修复前 tier 2 对一条真正已合并的分支静默返回「未合并」'
+    Check ((Get-HandoffVerdict -Repo $mainRevRepo -BranchName 'feat/merged-remote' `
+      -MainBranch $mainRevMain -Mode 'legacy-bare-main') -eq 'KEEP') `
+      'S6 鉴别力：修复前该孤儿现场文件永远回收不掉'
+
+    Check ((Resolve-MainRevision -Repo $mainRevRepo -MainBranch $mainRevMain) -eq 'origin/main') `
+      'S6 <主干修订> 第 2 顺位退到 origin/main'
+    Check (Test-BranchMerged -Repo $mainRevRepo -BranchName 'feat/merged-remote' `
+      -MainBranch $mainRevMain) `
+      'S6 现行 tier 2 用 <主干修订> 命中已合并进远端主干的分支'
+    Check ((Get-HandoffVerdict -Repo $mainRevRepo -BranchName 'feat/merged-remote' `
+      -MainBranch $mainRevMain) -eq 'COLLECT') `
+      'S6 现行判据给出 COLLECT，本地主干异名时孤儿回收恢复工作'
+
+    # 安全底线：两种形式都解析不到时是「跳过 tier 2」，不是「已合并」。
+    Check ($null -eq (Resolve-MainRevision -Repo $mainRevRepo -MainBranch 'trunk-never-existed')) `
+      'S6 裸名与 <remote>/<主干名> 都解析不到时返回 $null（跳过 tier 2 并报告）'
+    Check (-not (Test-BranchMerged -Repo $mainRevRepo -BranchName 'feat/merged-remote' `
+      -MainBranch 'trunk-never-existed')) `
+      'S6 跳过 tier 2 时不产出 tier 2 决议，绝不据此删除'
+  } finally {
+    Remove-ScenarioTree $mainRevScenario.Root
   }
 
   # 零残留核对：本节全部场景目录都建在 $env:TEMP 下，且都已在 finally 中删除
